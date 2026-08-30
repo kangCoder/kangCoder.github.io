@@ -1,122 +1,59 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import {
+  HashRouter,
+  NavLink,
+  Navigate,
+  Route,
+  Routes,
+} from 'react-router-dom'
+import { ExerciseListScreen } from './screens/ExerciseListScreen'
+import { TemplateEditScreen } from './screens/TemplateEditScreen'
+import { TemplateListScreen } from './screens/TemplateListScreen'
 
-function App() {
-  const [count, setCount] = useState(0)
-
+/**
+ * 해시 라우팅을 쓰는 이유 — GitHub Pages는 SPA 폴백이 없어서 새로고침 시 404가 난다.
+ * 404.html 트릭 대신 해시를 쓰면 서비스워커 등록(§3.1)과도 부딪히지 않는다.
+ */
+export function App() {
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+    <HashRouter>
+      <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col pb-[calc(var(--spacing-tabbar)+env(safe-area-inset-bottom))]">
+        <main className="flex-1">
+          <Routes>
+            {/* 홈(§5의 1번 화면)은 2주차 범위다 */}
+            <Route path="/" element={<Navigate to="/exercises" replace />} />
+            <Route path="/exercises" element={<ExerciseListScreen />} />
+            <Route path="/templates" element={<TemplateListScreen />} />
+            <Route path="/templates/:id" element={<TemplateEditScreen />} />
+            <Route path="*" element={<Navigate to="/exercises" replace />} />
+          </Routes>
+        </main>
+        <TabBar />
+      </div>
+    </HashRouter>
   )
 }
 
-export default App
+const TABS = [
+  { to: '/exercises', label: '종목' },
+  { to: '/templates', label: '템플릿' },
+]
+
+function TabBar() {
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-20 mx-auto flex w-full max-w-md border-t border-zinc-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+      {TABS.map((tab) => (
+        <NavLink
+          key={tab.to}
+          to={tab.to}
+          className={({ isActive }) =>
+            `flex h-tabbar flex-1 items-center justify-center text-[13px] font-medium transition-colors ${
+              isActive ? 'text-zinc-900' : 'text-zinc-400'
+            }`
+          }
+        >
+          {tab.label}
+        </NavLink>
+      ))}
+    </nav>
+  )
+}
