@@ -70,12 +70,19 @@ export interface Workout {
   note?: string
 }
 
-/** 세션에 복사된 종목. exerciseName은 표시용 비정규화 복사본이다. */
+/**
+ * 세션에 복사된 종목. exerciseName과 exerciseType은 표시용 비정규화 복사본이다.
+ *
+ * 타입까지 복사하는 이유 — 어떤 입력 칸을 그릴지가 타입으로 정해지므로,
+ * 조인해서 읽으면 나중에 종목 타입을 바꾸거나 종목을 삭제했을 때
+ * 과거 기록을 그리지 못한다. 이름을 복사하는 이유와 같다(§4.3).
+ */
 export interface WorkoutExercise {
   id: string
   workoutId: string
   exerciseId: string
   exerciseName: string
+  exerciseType: ExerciseType
   sortOrder: number
   /** CHECKLIST 타입용 */
   isChecked?: boolean
