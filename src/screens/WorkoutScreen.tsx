@@ -11,6 +11,8 @@ import {
   SET_TYPE_MARK,
   nextSetType,
 } from '../components/setTypeMeta'
+import { formatDuration } from '../lib/duration'
+import { useElapsed } from '../lib/useElapsed'
 import type { Exercise, WorkoutSet } from '../db/types'
 import {
   addExerciseToWorkout,
@@ -26,6 +28,7 @@ import {
   type WorkoutItem,
 } from '../db/workouts'
 import { ExercisePickerSheet } from './ExercisePickerSheet'
+import { WorkoutDetailScreen } from './WorkoutDetailScreen'
 import { WorkoutFinishSheet } from './WorkoutFinishSheet'
 
 /**
@@ -45,8 +48,17 @@ export function WorkoutScreen() {
     undefined,
   )
   const items = useLiveQuery(() => (id ? listWorkoutItems(id) : []), [id])
+  // 카운트업이 아니라 매 틱마다 Date.now()와의 차이를 새로 구한다 — §6.1
+  const elapsed = useElapsed(
+    workout && workout.endedAt === undefined ? workout.startedAt : undefined,
+  )
 
   if (!id) return null
+
+  // 종료된 세션은 읽기 전용 상세로 보여준다
+  if (workout?.endedAt !== undefined) {
+    return <WorkoutDetailScreen workoutId={id} />
+  }
 
   if (items !== undefined && workout === undefined) {
     return (
@@ -72,18 +84,39 @@ export function WorkoutScreen() {
 
   return (
     <div className="flex flex-col">
-      <header className="sticky top-0 z-10 flex items-center gap-2 bg-zinc-100/90 px-4 pt-3 pb-2 backdrop-blur">
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[20px] font-bold text-zinc-900">
-            {workout?.templateName ?? '세션'}
-          </h1>
-          <p className="text-[12px] text-zinc-500">
-            세트 {completedSets}/{totalSets} 완료
-          </p>
+      <header className="sticky top-0 z-10 bg-zinc-100/90 px-4 pt-3 pb-2 backdrop-blur">
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-[20px] font-bold text-zinc-900">
+              {workout?.templateName ?? '세션'}
+            </h1>
+            <p className="text-[12px] text-zinc-500">
+              세트 {completedSets}/{totalSets} 완료
+            </p>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-[22px] leading-tight font-semibold tabular-nums text-zinc-900">
+              {formatDuration(elapsed)}
+            </p>
+            <p className="text-[11px] text-zinc-400">경과</p>
+          </div>
         </div>
-        <Button variant="primary" onClick={() => setFinishing(true)}>
-          종료
-        </Button>
+        <div className="mt-2 flex gap-2">
+          <Button
+            variant="danger"
+            className="flex-1"
+            onClick={() => setConfirmingDiscard(true)}
+          >
+            운동 취소
+          </Button>
+          <Button
+            variant="primary"
+            className="flex-2"
+            onClick={() => setFinishing(true)}
+          >
+            운동 종료
+          </Button>
+        </div>
       </header>
 
       {items === undefined ? null : items.length === 0 ? (
@@ -105,13 +138,6 @@ export function WorkoutScreen() {
 
       <div className="flex flex-col gap-2 px-4 py-4">
         <Button onClick={() => setPicking(true)}>+ 종목 추가</Button>
-        <Button
-          variant="ghost"
-          className="mt-4"
-          onClick={() => setConfirmingDiscard(true)}
-        >
-          세션 버리기
-        </Button>
       </div>
 
       {picking && (
@@ -134,9 +160,9 @@ export function WorkoutScreen() {
 
       {confirmingDiscard && (
         <ConfirmDialog
-          title="이 세션을 버릴까요?"
+          title="이 운동을 취소할까요?"
           description="입력한 세트가 모두 사라지고 기록이 남지 않습니다."
-          confirmLabel="버리기"
+          confirmLabel="취소하기"
           onConfirm={discard}
           onCancel={() => setConfirmingDiscard(false)}
         />

@@ -32,10 +32,15 @@ export interface ConditionInput {
 /**
  * 템플릿에서 세션을 시작한다 — §4.3의 스냅샷 복사.
  *
- * TemplateExercise를 WorkoutExercise로 복사하고, 목표 세트 수만큼
- * WorkoutSet을 미리 만들어 목표 중량·렙을 채워 둔다(§5.1 "미리 채워둔다").
- * 복사가 끝나면 세션은 템플릿과 완전히 독립이다. 이후 템플릿을 어떻게
- * 고치든 이 기록은 변하지 않는다.
+ * TemplateExercise를 WorkoutExercise로 복사하고, 세트를 미리 만들어 둔다.
+ * 세트 값의 출처는 두 가지다(§5.1 "미리 채워둔다"):
+ *   1순위 — 같은 템플릿의 직전 세션에서 실제로 완료한 세트. 세트 수, 중량,
+ *           렙, setType을 그대로 가져오므로 매주 다시 입력할 필요가 없다.
+ *   2순위 — 직전 세션이 없거나 완료한 세트가 없으면 템플릿 목표치.
+ * 완료 체크가 없던 세트는 수행하지 않은 것이므로 가져오지 않는다.
+ * 그렇지 않으면 안 한 세트가 매주 불어난다.
+ *
+ * 복사가 끝나면 세션은 템플릿과 완전히 독립이다.
  */
 export async function startWorkoutFromTemplate(
   templateId: string,
@@ -62,6 +67,8 @@ export async function startWorkoutFromTemplate(
       const exercises = await db.exercises.bulkGet(
         templateItems.map((item) => item.exerciseId),
       )
+
+      const previous = await findPreviousSetsByExercise(templateId)
 
       const workoutId = newId()
       await db.workouts.add({
@@ -92,6 +99,24 @@ export async function startWorkoutFromTemplate(
 
         // CHECKLIST는 세트 수 카운트에서 제외되므로 세트를 만들지 않는다 — §4.1
         if (exercise.type === 'CHECKLIST') return
+
+        const lastTime = previous.get(exercise.id)
+        if (lastTime && lastTime.length > 0) {
+          lastTime.forEach((set, i) => {
+            workoutSets.push({
+              id: newId(),
+              workoutExerciseId,
+              exerciseId: exercise.id,
+              setNumber: i + 1,
+              setType: set.setType,
+              weight: set.weight,
+              reps: set.reps,
+              seconds: set.seconds,
+              isCompleted: false,
+            })
+          })
+          return
+        }
 
         const setCount = Math.max(1, item.targetSets ?? 1)
         for (let setNumber = 1; setNumber <= setCount; setNumber++) {
@@ -162,6 +187,11 @@ export async function listRecentWorkouts(
     .limit(limit)
     .toArray()
 
+  return summarize(workouts)
+}
+
+/** 세션 목록에 세트 수와 볼륨을 붙인다. 세션마다 쿼리하지 않고 한 번에 모은다. */
+async function summarize(workouts: Workout[]): Promise<WorkoutSummary[]> {
   const items = await db.workoutExercises
     .where('workoutId')
     .anyOf(workouts.map((workout) => workout.id))
@@ -325,7 +355,60 @@ export async function finishWorkout(
   })
 }
 
-/** 잘못 시작한 세션 버리기 */
+/**
+ * 같은 템플릿의 직전 종료 세션에서, 종목별 완료 세트를 순서대로 모은다.
+ * 종목이 매칭되지 않으면(그 사이 템플릿이 바뀌었다면) 그 종목은 빠지고
+ * 호출부가 템플릿 목표치로 폴백한다.
+ */
+async function findPreviousSetsByExercise(
+  templateId: string,
+): Promise<Map<string, WorkoutSet[]>> {
+  const previous = await db.workouts
+    .orderBy('startedAt')
+    .reverse()
+    .filter(
+      (workout) =>
+        workout.endedAt !== undefined && workout.templateId === templateId,
+    )
+    .first()
+  if (!previous) return new Map()
+
+  const items = await db.workoutExercises
+    .where('workoutId')
+    .equals(previous.id)
+    .toArray()
+  const sets = await db.workoutSets
+    .where('workoutExerciseId')
+    .anyOf(items.map((item) => item.id))
+    .toArray()
+
+  const byExercise = new Map<string, WorkoutSet[]>()
+  for (const item of items) {
+    const own = sets
+      .filter((set) => set.workoutExerciseId === item.id && set.isCompleted)
+      .sort((a, b) => a.setNumber - b.setNumber)
+    if (own.length > 0) byExercise.set(item.exerciseId, own)
+  }
+  return byExercise
+}
+
+/** 캘린더용: 한 달치 세션. 진행 중인 것도 포함한다. */
+export async function listWorkoutsBetween(
+  from: number,
+  to: number,
+): Promise<WorkoutSummary[]> {
+  const workouts = await db.workouts
+    .where('startedAt')
+    .between(from, to, true, true)
+    .reverse()
+    .toArray()
+  return summarize(workouts)
+}
+
+/**
+ * 세션 삭제. 진행 중인 세션을 버릴 때도, 남은 기록을 지울 때도 같은 동작이라
+ * 함수를 하나로 둔다.
+ */
 export async function discardWorkout(id: string): Promise<void> {
   await db.transaction(
     'rw',

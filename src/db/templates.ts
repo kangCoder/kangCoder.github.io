@@ -5,9 +5,10 @@ import type { Exercise, Template, TemplateExercise } from './types'
  * 템플릿 쿼리 — 컴포넌트는 이 함수들만 호출하고 db를 직접 만지지 않는다.
  */
 
-/** 목록 화면용: 템플릿 + 종목 수 */
+/** 목록 화면용: 템플릿 + 종목 수 + 미리보기용 이름 (순서대로) */
 export interface TemplateSummary extends Template {
   itemCount: number
+  exerciseNames: string[]
 }
 
 /**
@@ -36,10 +37,24 @@ export async function listTemplateSummaries(
 ): Promise<TemplateSummary[]> {
   const templates = await listTemplates(includeArchived)
   const items = await db.templateExercises.toArray()
-  return templates.map((t) => ({
-    ...t,
-    itemCount: items.filter((te) => te.templateId === t.id).length,
-  }))
+  // 조인이 없으므로 필요한 종목을 한 번에 가져와 앱에서 붙인다(§4.5)
+  const exercises = await db.exercises.bulkGet(items.map((te) => te.exerciseId))
+  const nameById = new Map(
+    exercises.filter((e) => e !== undefined).map((e) => [e.id, e.name]),
+  )
+
+  return templates.map((t) => {
+    const own = items
+      .filter((te) => te.templateId === t.id)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+    return {
+      ...t,
+      itemCount: own.length,
+      exerciseNames: own
+        .map((te) => nameById.get(te.exerciseId))
+        .filter((name) => name !== undefined),
+    }
+  })
 }
 
 export async function createTemplate(name: string): Promise<string> {
@@ -131,6 +146,47 @@ export async function addExerciseToTemplate(
     ...defaults,
   })
   return id
+}
+
+/**
+ * 편집 화면 드래프트를 한 트랜잭션으로 커밋한다.
+ *
+ * diff 대신 통째로 지우고 다시 넣는다 — 훨씬 단순하고, templateExercise의 id를
+ * 참조하는 곳이 없어서(세션은 스냅샷 복사다) 재발급해도 안전하다.
+ */
+export interface TemplateDraftItem {
+  exerciseId: string
+  targetSets?: number
+  targetReps?: number
+  targetWeight?: number
+  targetSeconds?: number
+  restSeconds?: number
+  note?: string
+}
+
+export async function saveTemplate(
+  templateId: string,
+  name: string,
+  items: TemplateDraftItem[],
+): Promise<void> {
+  await db.transaction('rw', db.templates, db.templateExercises, async () => {
+    await db.templates.update(templateId, { name: name.trim() })
+
+    const existing = await db.templateExercises
+      .where('templateId')
+      .equals(templateId)
+      .toArray()
+    await db.templateExercises.bulkDelete(existing.map((te) => te.id))
+
+    await db.templateExercises.bulkAdd(
+      items.map((item, index) => ({
+        ...item,
+        id: newId(),
+        templateId,
+        sortOrder: index,
+      })),
+    )
+  })
 }
 
 export type TemplateExercisePatch = Partial<
