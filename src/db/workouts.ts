@@ -1,4 +1,4 @@
-import { totalVolume } from '../lib/metrics'
+import { bestOneRepMax, totalVolume } from '../lib/metrics'
 import { db, newId } from './db'
 import type {
   Exercise,
@@ -94,6 +94,7 @@ export async function startWorkoutFromTemplate(
           exerciseName: exercise.name,
           exerciseType: exercise.type,
           sortOrder: item.sortOrder,
+          restSeconds: item.restSeconds,
           ...(exercise.type === 'CHECKLIST' ? { isChecked: false } : {}),
         })
 
@@ -308,7 +309,10 @@ export async function addExerciseToWorkout(
       exerciseName: exercise.name,
       exerciseType: exercise.type,
       sortOrder: (existing.at(-1)?.sortOrder ?? -1) + 1,
-      ...(exercise.type === 'CHECKLIST' ? { isChecked: false } : {}),
+      // 참조할 템플릿 행이 없으므로 템플릿 추가와 같은 기본 휴식을 준다
+      ...(exercise.type === 'CHECKLIST'
+        ? { isChecked: false }
+        : { restSeconds: 120 }),
     })
 
     if (exercise.type !== 'CHECKLIST') {
@@ -390,6 +394,86 @@ async function findPreviousSetsByExercise(
     if (own.length > 0) byExercise.set(item.exerciseId, own)
   }
   return byExercise
+}
+
+/** 주간 리포트용: 세션 하나와 그 안의 종목·세트 전부 */
+export interface WorkoutReport {
+  workout: Workout
+  items: WorkoutItem[]
+}
+
+/**
+ * 기간 안에 종료된 세션을 종목·세트까지 함께 가져온다.
+ * 세션마다 쿼리하지 않고 한 번에 모아 앱에서 묶는다(§4.5).
+ */
+export async function listWorkoutReportsBetween(
+  from: number,
+  to: number,
+): Promise<WorkoutReport[]> {
+  const workouts = await db.workouts
+    .where('startedAt')
+    .between(from, to, true, true)
+    .filter((workout) => workout.endedAt !== undefined)
+    .sortBy('startedAt')
+
+  const allItems = await db.workoutExercises
+    .where('workoutId')
+    .anyOf(workouts.map((workout) => workout.id))
+    .toArray()
+  const allSets = await db.workoutSets
+    .where('workoutExerciseId')
+    .anyOf(allItems.map((item) => item.id))
+    .toArray()
+
+  return workouts.map((workout) => ({
+    workout,
+    items: allItems
+      .filter((item) => item.workoutId === workout.id)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((item) => ({
+        ...item,
+        sets: allSets
+          .filter((set) => set.workoutExerciseId === item.id)
+          .sort((a, b) => a.setNumber - b.setNumber),
+      })),
+  }))
+}
+
+/**
+ * 이 종목의 "직전 세션" 최고 e1RM — 리포트의 증감 괄호에 쓴다.
+ *
+ * 복합 인덱스 [exerciseId+completedAt]으로 before 이전의 완료 세트만 훑고,
+ * workoutExerciseId로 묶어 가장 최근 묶음(= 직전 세션의 그 종목)을 고른다.
+ * 인덱스가 완료 세트만 잡으므로 미완료는 애초에 들어오지 않고,
+ * 워밍업은 bestOneRepMax가 걸러낸다(§7).
+ */
+export async function previousBestOneRepMax(
+  exerciseId: string,
+  before: number,
+): Promise<number | undefined> {
+  const sets = await db.workoutSets
+    .where('[exerciseId+completedAt]')
+    .between([exerciseId, 0], [exerciseId, before], true, false)
+    .toArray()
+  if (sets.length === 0) return undefined
+
+  const byItem = new Map<string, WorkoutSet[]>()
+  for (const set of sets) {
+    const group = byItem.get(set.workoutExerciseId)
+    if (group) group.push(set)
+    else byItem.set(set.workoutExerciseId, [set])
+  }
+
+  let latest: WorkoutSet[] | undefined
+  let latestAt = -1
+  for (const group of byItem.values()) {
+    const at = Math.max(...group.map((set) => set.completedAt ?? 0))
+    if (at > latestAt) {
+      latestAt = at
+      latest = group
+    }
+  }
+  return latest ? bestOneRepMax(latest) : undefined
 }
 
 /** 캘린더용: 한 달치 세션. 진행 중인 것도 포함한다. */

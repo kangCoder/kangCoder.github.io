@@ -84,6 +84,13 @@ export interface WorkoutExercise {
   exerciseName: string
   exerciseType: ExerciseType
   sortOrder: number
+  /**
+   * 세트 사이 휴식(초). 템플릿에서 복사한 값이다 — 진행 중에 템플릿을 고쳐도
+   * 이번 세션의 휴식이 바뀌면 안 되고, 세션 중 즉석 추가한 종목은 참조할
+   * 템플릿 행 자체가 없다.
+   * 0은 §4.4의 슈퍼세트 표현이므로 타이머를 걸지 않는다.
+   */
+  restSeconds?: number
   /** CHECKLIST 타입용 */
   isChecked?: boolean
 }

@@ -123,7 +123,16 @@ export function HomeScreen() {
 
       <section className="px-4 pb-4">
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-[13px] font-medium text-zinc-500">기록</h2>
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-[13px] font-medium text-zinc-500">기록</h2>
+            <button
+              type="button"
+              onClick={() => navigate('/report')}
+              className="text-[13px] font-medium text-zinc-900 underline underline-offset-2"
+            >
+              주간 리포트
+            </button>
+          </div>
           <div className="flex rounded-lg bg-zinc-200 p-0.5">
             {(['list', 'calendar'] as const).map((option) => (
               <button

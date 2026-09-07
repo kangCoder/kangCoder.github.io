@@ -9,6 +9,7 @@ import { ExerciseListScreen } from './screens/ExerciseListScreen'
 import { HomeScreen } from './screens/HomeScreen'
 import { TemplateEditScreen } from './screens/TemplateEditScreen'
 import { TemplateListScreen } from './screens/TemplateListScreen'
+import { WeeklyReportScreen } from './screens/WeeklyReportScreen'
 import { WorkoutScreen } from './screens/WorkoutScreen'
 
 /**
@@ -26,6 +27,7 @@ export function App() {
             <Route path="/exercises" element={<ExerciseListScreen />} />
             <Route path="/templates" element={<TemplateListScreen />} />
             <Route path="/templates/:id" element={<TemplateEditScreen />} />
+            <Route path="/report" element={<WeeklyReportScreen />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

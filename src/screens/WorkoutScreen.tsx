@@ -1,18 +1,22 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, IconButton } from '../components/Button'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { EmptyState } from '../components/EmptyState'
 import { ExerciseTypeBadge } from '../components/ExerciseTypeBadge'
 import { NumberField } from '../components/fields'
+import { RestTimerBar } from '../components/RestTimerBar'
 import {
   SET_TYPE_CLASS,
   SET_TYPE_MARK,
   nextSetType,
 } from '../components/setTypeMeta'
+import { playAlarm, unlockAlarm } from '../lib/alarm'
 import { formatDuration } from '../lib/duration'
+import { useCountdown } from '../lib/useCountdown'
 import { useElapsed } from '../lib/useElapsed'
+import { useWakeLock } from '../lib/useWakeLock'
 import type { Exercise, WorkoutSet } from '../db/types'
 import {
   addExerciseToWorkout,
@@ -31,6 +35,14 @@ import { ExercisePickerSheet } from './ExercisePickerSheet'
 import { WorkoutDetailScreen } from './WorkoutDetailScreen'
 import { WorkoutFinishSheet } from './WorkoutFinishSheet'
 
+/** 진행 중인 휴식. 화면에만 사는 값이라 DB에 남기지 않는다. */
+interface RestState {
+  /** 이 타이머를 식별하고, 첫 프레임의 기준 시각이 된다 */
+  startedAt: number
+  endsAt: number
+  label: string
+}
+
 /**
  * 세션 진행 화면 — §5.1
  * 헬스장에서 땀난 손으로, 세트 사이 짧은 시간에, 한 손으로 조작한다.
@@ -41,6 +53,7 @@ export function WorkoutScreen() {
   const [picking, setPicking] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  const [rest, setRest] = useState<RestState>()
 
   const workout = useLiveQuery(
     () => (id ? getWorkout(id) : undefined),
@@ -52,6 +65,13 @@ export function WorkoutScreen() {
   const elapsed = useElapsed(
     workout && workout.endedAt === undefined ? workout.startedAt : undefined,
   )
+
+  const isRunning = workout !== undefined && workout.endedAt === undefined
+  // 화면이 꺼지면 JS 타이머가 멈춘다 — 세션 동안 켜 둔다(§6.2)
+  useWakeLock(isRunning)
+
+  const onRestFinish = useCallback(() => playAlarm(), [])
+  const restRemaining = useCountdown(rest?.startedAt, rest?.endsAt, onRestFinish)
 
   if (!id) return null
 
@@ -80,6 +100,24 @@ export function WorkoutScreen() {
   async function discard() {
     await discardWorkout(id!)
     navigate('/', { replace: true })
+  }
+
+  /**
+   * 세트 완료 체크 → 그 종목의 휴식 시간만큼 카운트다운을 건다.
+   * restSeconds가 0이면 §4.4의 슈퍼세트 표현이므로 쉬지 않고 넘어간다.
+   */
+  async function toggleSet(set: WorkoutSet, item: WorkoutItem, next: boolean) {
+    // iOS는 제스처 밖에서 시작한 오디오를 막는다. 이 탭이 그 제스처다.
+    unlockAlarm()
+    await setWorkoutSetCompleted(set.id, next)
+
+    if (!next || !item.restSeconds || item.restSeconds <= 0) return
+    const startedAt = Date.now()
+    setRest({
+      startedAt,
+      endsAt: startedAt + item.restSeconds * 1000,
+      label: item.exerciseName,
+    })
   }
 
   return (
@@ -131,7 +169,11 @@ export function WorkoutScreen() {
       ) : (
         <ul className="flex flex-col gap-3 px-4 pt-1">
           {items.map((item) => (
-            <WorkoutItemCard key={item.id} item={item} />
+            <WorkoutItemCard
+              key={item.id}
+              item={item}
+              onToggleSet={toggleSet}
+            />
           ))}
         </ul>
       )}
@@ -139,6 +181,23 @@ export function WorkoutScreen() {
       <div className="flex flex-col gap-2 px-4 py-4">
         <Button onClick={() => setPicking(true)}>+ 종목 추가</Button>
       </div>
+
+      {rest && (
+        <RestTimerBar
+          label={rest.label}
+          remainingMs={restRemaining}
+          totalMs={rest.endsAt - rest.startedAt}
+          onExtend={(seconds) =>
+            setRest((current) =>
+              current && {
+                ...current,
+                endsAt: current.endsAt + seconds * 1000,
+              },
+            )
+          }
+          onDismiss={() => setRest(undefined)}
+        />
+      )}
 
       {picking && (
         <ExercisePickerSheet
@@ -171,7 +230,13 @@ export function WorkoutScreen() {
   )
 }
 
-function WorkoutItemCard({ item }: { item: WorkoutItem }) {
+function WorkoutItemCard({
+  item,
+  onToggleSet,
+}: {
+  item: WorkoutItem
+  onToggleSet: (set: WorkoutSet, item: WorkoutItem, next: boolean) => void
+}) {
   const done = item.sets.filter((set) => set.isCompleted).length
   // 지역 const로 받아야 아래 map 콜백 안에서도 타입 내로잉이 유지된다
   const type = item.exerciseType
@@ -222,7 +287,12 @@ function WorkoutItemCard({ item }: { item: WorkoutItem }) {
         <>
           <ul className="mt-2 flex flex-col gap-1.5">
             {item.sets.map((set) => (
-              <SetRow key={set.id} set={set} type={type} />
+              <SetRow
+                key={set.id}
+                set={set}
+                type={type}
+                onToggle={(next) => onToggleSet(set, item, next)}
+              />
             ))}
           </ul>
           <div className="mt-2 flex gap-2">
@@ -246,9 +316,11 @@ function WorkoutItemCard({ item }: { item: WorkoutItem }) {
 function SetRow({
   set,
   type,
+  onToggle,
 }: {
   set: WorkoutSet
   type: 'WEIGHT_REPS' | 'TIME'
+  onToggle: (next: boolean) => void
 }) {
   return (
     <li className="flex items-center gap-1.5">
@@ -292,7 +364,7 @@ function SetRow({
       <button
         type="button"
         aria-label={set.isCompleted ? '완료 취소' : '완료'}
-        onClick={() => setWorkoutSetCompleted(set.id, !set.isCompleted)}
+        onClick={() => onToggle(!set.isCompleted)}
         className={`flex size-11 shrink-0 items-center justify-center rounded-xl transition-colors ${
           set.isCompleted
             ? 'bg-zinc-900 text-white'
