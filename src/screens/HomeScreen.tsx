@@ -54,7 +54,7 @@ export function HomeScreen() {
 
   return (
     <div className="flex flex-col">
-      <header className="px-4 pt-3 pb-2">
+      <header className="px-4 pt-2 pb-2">
         <h1 className="text-[22px] font-bold text-zinc-900">운동 기록</h1>
         <p className="text-[13px] text-zinc-500">
           {format(new Date(), 'M월 d일 (EEE)', { locale: ko })}

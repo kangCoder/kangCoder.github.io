@@ -23,7 +23,7 @@ export function TemplateListScreen() {
 
   return (
     <div className="flex flex-col">
-      <header className="sticky top-0 z-10 bg-zinc-100/90 px-4 pt-3 pb-2 backdrop-blur">
+      <header className="sticky top-0 z-10 bg-zinc-100/90 px-4 pt-2 pb-2 backdrop-blur">
         <div className="flex items-center justify-between">
           <h1 className="text-[22px] font-bold text-zinc-900">템플릿</h1>
           <Button variant="primary" onClick={() => setAdding(true)}>
