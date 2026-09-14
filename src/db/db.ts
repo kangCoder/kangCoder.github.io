@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
+import type { AppSettings } from './appSettings'
 import type {
   Bodyweight,
   Exercise,
@@ -26,6 +27,7 @@ class WorkoutDB extends Dexie {
   workoutSets!: EntityTable<WorkoutSet, 'id'>
   runs!: EntityTable<Run, 'id'>
   bodyweights!: EntityTable<Bodyweight, 'date'>
+  appSettings!: EntityTable<AppSettings, 'id'>
 
   constructor() {
     super('workout-log')
@@ -39,6 +41,11 @@ class WorkoutDB extends Dexie {
       workoutSets: 'id, workoutExerciseId, [exerciseId+completedAt]',
       runs: 'id, startedAt',
       bodyweights: 'date',
+    })
+
+    /** v2 — 어느 영역(운동·가계부)을 쓸지 저장할 곳. 기존 데이터는 건드리지 않는다. */
+    this.version(2).stores({
+      appSettings: 'id',
     })
   }
 }

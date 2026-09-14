@@ -10,6 +10,7 @@ import { listCategories } from '../db/categories'
 import {
   createFixedCost,
   deleteFixedCost,
+  ensureFixedCostTransactions,
   listFixedCosts,
   updateFixedCost,
   type FixedCostItem,
@@ -28,6 +29,11 @@ export function FixedCostScreen() {
   const items = useLiveQuery(() => listFixedCosts(), [])
   const [editing, setEditing] = useState<FixedCostItem>()
   const [adding, setAdding] = useState(false)
+  const [applied, setApplied] = useState<number>()
+
+  async function applyToCycle() {
+    setApplied(await ensureFixedCostTransactions(currentCycle, payday))
+  }
 
   const currentCycle = getCurrentCycleKey(payday)
   // 12개월 안에 끝나는 고정비는 미리 알려준다 — 이후 여력이 그만큼 생긴다
@@ -51,6 +57,22 @@ export function FixedCostScreen() {
           활성 {active.length}건 · 월 {formatWon(total)}원
         </p>
       </header>
+
+      {/* 자동 생성하지 않는다 — 실제로 나간 달에만 직접 반영한다 */}
+      {active.length > 0 && (
+        <section className="px-4 pb-3">
+          <Button variant="primary" className="w-full" onClick={applyToCycle}>
+            이번 사이클에 반영
+          </Button>
+          <p className="mt-1 text-[11px] text-zinc-400">
+            {applied === undefined
+              ? '활성 고정비를 이번 사이클 거래로 만듭니다. 이미 만든 항목은 건너뜁니다.'
+              : applied === 0
+                ? '이미 전부 반영되어 있습니다.'
+                : `${applied}건을 거래로 만들었습니다.`}
+          </p>
+        </section>
+      )}
 
       {ending.length > 0 && (
         <section className="px-4 pb-3">

@@ -4,6 +4,8 @@ import { Button, IconButton } from '../../components/Button'
 import { Label, TextField } from '../../components/fields'
 import { AmountField } from '../components/AmountField'
 import { listCategories } from '../db/categories'
+import { CategoryPickerSheet } from '../components/CategoryPickerSheet'
+import { TYPE_CLASS, TYPE_LABEL } from '../components/categoryTypeMeta'
 import { DEFAULT_PAYDAY, getIncomeSetting } from '../db/income'
 import {
   countUsageByCategory,
@@ -11,7 +13,6 @@ import {
   deleteTransaction,
   listTransactionsBetween,
 } from '../db/transactions'
-import type { Category } from '../db/types'
 import { formatWon } from '../lib/money'
 import {
   currentWeek,
@@ -48,18 +49,21 @@ export function TransactionFormScreen() {
   const [memo, setMemo] = useState('')
   const [error, setError] = useState<string>()
   const [savedAt, setSavedAt] = useState(0)
+  const [picking, setPicking] = useState(false)
 
-  // 사용 빈도순 자동 정렬 — 자주 쓰는 것이 위로 온다
-  const ordered = useMemo(() => {
-    const list = categories ?? []
+  // 퀵버튼에는 실제로 써 본 것만 올린다. 한 번도 안 쓴 카테고리로 채우면
+  // 정작 자주 쓰는 것이 밀려난다 — 전체 목록은 시트에서 본다.
+  const frequent = useMemo(() => {
     const counts = usage ?? new Map<string, number>()
-    return [...list].sort((a, b) => {
-      const diff = (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0)
-      return diff !== 0 ? diff : a.sortOrder - b.sortOrder
-    })
+    return (categories ?? [])
+      .filter((category) => (counts.get(category.id) ?? 0) > 0)
+      .sort((a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0))
+      .slice(0, 8)
   }, [categories, usage])
 
-  const selected = ordered.find((category) => category.id === categoryId)
+  const selected = (categories ?? []).find(
+    (category) => category.id === categoryId,
+  )
   // 이 주에 실제로 쓴 돈 — 지출만 센다
   const weekTotal = (inWeek ?? [])
     .filter((tx) => tx.type === 'EXPENSE')
@@ -127,20 +131,48 @@ export function TransactionFormScreen() {
 
       <section className="px-4 pb-3">
         <Label>카테고리</Label>
-        {ordered.length === 0 ? (
-          <p className="text-[13px] text-zinc-400">카테고리가 없습니다</p>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {ordered.slice(0, 12).map((category) => (
-              <QuickButton
+        <button
+          type="button"
+          onClick={() => setPicking(true)}
+          className={`flex min-h-12 w-full items-center gap-2 rounded-xl px-3 text-left ring-1 transition-colors ${
+            selected
+              ? 'bg-white ring-zinc-300 active:bg-zinc-50'
+              : 'bg-white ring-zinc-300'
+          } ${error && !selected ? 'ring-red-400' : ''}`}
+        >
+          <span
+            className={`min-w-0 flex-1 truncate text-[16px] ${selected ? 'font-medium text-zinc-900' : 'text-zinc-400'}`}
+          >
+            {selected?.name ?? '카테고리를 고르세요'}
+          </span>
+          {selected && (
+            <span
+              className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${TYPE_CLASS[selected.type]}`}
+            >
+              {TYPE_LABEL[selected.type]}
+            </span>
+          )}
+          <span className="shrink-0 text-[12px] text-zinc-400">▾</span>
+        </button>
+
+        {frequent.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {frequent.map((category) => (
+              <button
                 key={category.id}
-                category={category}
-                selected={category.id === categoryId}
-                onSelect={() => {
+                type="button"
+                onClick={() => {
                   setCategoryId(category.id)
                   setError(undefined)
                 }}
-              />
+                className={`min-h-9 rounded-lg px-2.5 text-[13px] font-medium ring-1 transition-colors ${
+                  category.id === categoryId
+                    ? 'bg-zinc-900 text-white ring-zinc-900'
+                    : 'bg-white text-zinc-600 ring-zinc-300 active:bg-zinc-100'
+                }`}
+              >
+                {category.name}
+              </button>
             ))}
           </div>
         )}
@@ -182,6 +214,17 @@ export function TransactionFormScreen() {
           {selected ? `${selected.name} 저장` : '저장'}
         </Button>
       </section>
+
+      {picking && (
+        <CategoryPickerSheet
+          selectedId={categoryId}
+          onSelect={(category) => {
+            setCategoryId(category.id)
+            setError(undefined)
+          }}
+          onClose={() => setPicking(false)}
+        />
+      )}
 
       <section className="px-4 pb-4">
         <div className="mb-2 flex items-baseline justify-between">
@@ -244,13 +287,6 @@ export function TransactionFormScreen() {
   )
 }
 
-const TYPE_CLASS: Record<Category['type'], string> = {
-  EXPENSE: 'bg-white text-zinc-700 ring-zinc-300',
-  SAVING: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  TRANSFER: 'bg-sky-50 text-sky-700 ring-sky-200',
-  INCOME: 'bg-amber-50 text-amber-700 ring-amber-200',
-}
-
 function Chevron({ direction }: { direction: 'left' | 'right' }) {
   return (
     <svg viewBox="0 0 20 20" className="size-4" aria-hidden="true">
@@ -263,29 +299,5 @@ function Chevron({ direction }: { direction: 'left' | 'right' }) {
         fill="none"
       />
     </svg>
-  )
-}
-
-function QuickButton({
-  category,
-  selected,
-  onSelect,
-}: {
-  category: Category
-  selected: boolean
-  onSelect: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`min-h-11 rounded-xl px-3 text-[14px] font-medium ring-1 transition-colors ${
-        selected
-          ? 'bg-zinc-900 text-white ring-zinc-900'
-          : `${TYPE_CLASS[category.type]} active:bg-zinc-100`
-      }`}
-    >
-      {category.name}
-    </button>
   )
 }

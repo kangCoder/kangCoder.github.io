@@ -8,7 +8,10 @@ import {
 } from 'react-router-dom'
 import { FinanceDashboardScreen } from './finance/screens/FinanceDashboardScreen'
 import { FinanceLayout } from './finance/screens/FinanceLayout'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { AppSwitcher } from './components/AppSwitcher'
+import { getAppSettings } from './db/appSettings'
+import { AppSettingsScreen } from './screens/AppSettingsScreen'
 import { AssetsScreen } from './finance/screens/AssetsScreen'
 import { CategoryManageScreen } from './finance/screens/CategoryManageScreen'
 import { CycleReportScreen } from './finance/screens/CycleReportScreen'
@@ -43,15 +46,31 @@ export function App() {
  */
 function AppShell() {
   const { pathname } = useLocation()
+  const settings = useLiveQuery(() => getAppSettings(), [])
   const isFinance = pathname.startsWith('/finance')
   // 탭이 가리키는 최상위 화면에서만 띄운다. 상세 화면은 좌측 상단이 뒤로가기 자리다.
   const showSwitcher = ROOT_PATHS.includes(pathname)
 
+  if (settings === undefined) return null
+
+  // 끈 영역으로 들어오면 켜져 있는 쪽으로 보낸다
+  const fallback = settings.showWorkout ? '/' : '/finance'
+  if (isFinance && !settings.showFinance) return <Navigate to="/" replace />
+  if (!isFinance && !settings.showWorkout && pathname !== '/settings') {
+    return <Navigate to="/finance" replace />
+  }
+
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col pb-[calc(var(--spacing-tabbar)+env(safe-area-inset-bottom))]">
-      {showSwitcher && <AppSwitcher />}
+      {showSwitcher && (
+        <AppSwitcher
+          showWorkout={settings.showWorkout}
+          showFinance={settings.showFinance}
+        />
+      )}
       <main className="flex-1">
         <Routes>
+          <Route path="/settings" element={<AppSettingsScreen />} />
           <Route path="/" element={<HomeScreen />} />
           <Route path="/workouts/:id" element={<WorkoutScreen />} />
           <Route path="/exercises" element={<ExerciseListScreen />} />
@@ -72,11 +91,11 @@ function AppShell() {
             <Route path="settings" element={<FinanceSettingsScreen />} />
           </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to={fallback} replace />} />
         </Routes>
       </main>
       {/* 가계부 탭바는 FinanceLayout이 직접 렌더한다 */}
-      {!isFinance && <TabBar />}
+      {!isFinance && pathname !== '/settings' && <TabBar />}
     </div>
   )
 }
