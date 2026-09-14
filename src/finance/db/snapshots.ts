@@ -46,8 +46,16 @@ export async function ensurePreviousSnapshot(
   return true
 }
 
-/** 자산을 크게 고쳤을 때 이번 사이클 값을 직접 남기고 싶은 경우 */
-export async function captureSnapshot(cycleKey: string): Promise<void> {
+/**
+ * 순자산을 특정 사이클에 기록한다.
+ *
+ * 사이클이 끝나는 날에 맞춰 자산을 갱신하기 어렵다. 며칠 지나 입력하더라도
+ * 어느 시점 기준인지(asOf) 남겨 두면 추이 그래프를 읽을 때 근거가 된다.
+ */
+export async function captureSnapshot(
+  cycleKey: string,
+  asOf?: string,
+): Promise<void> {
   const [assets, debts] = await Promise.all([
     financeDb.assets.toArray(),
     financeDb.debts.toArray(),
@@ -60,5 +68,10 @@ export async function captureSnapshot(cycleKey: string): Promise<void> {
     totalDebts,
     netWorth: totalAssets - totalDebts,
     capturedAt: Date.now(),
+    asOf,
   })
+}
+
+export async function deleteSnapshot(cycleKey: string): Promise<void> {
+  await financeDb.netWorthSnapshots.delete(cycleKey)
 }

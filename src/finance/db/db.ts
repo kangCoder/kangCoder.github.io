@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from 'dexie'
 import type {
   Asset,
   Category,
+  CycleBudget,
   Debt,
   FixedCost,
   Goal,
@@ -31,6 +32,7 @@ class FinanceDB extends Dexie {
   goals!: EntityTable<Goal, 'id'>
   netWorthSnapshots!: EntityTable<NetWorthSnapshot, 'cycleKey'>
   incomeSettings!: EntityTable<IncomeSetting, 'id'>
+  cycleBudgets!: EntityTable<CycleBudget, 'cycleKey'>
 
   constructor() {
     super('finance-log')
@@ -83,6 +85,11 @@ class FinanceDB extends Dexie {
             delete category.group
           })
       })
+
+    /** v3 — 사이클별 총예산. 기존 데이터는 건드리지 않는다. */
+    this.version(3).stores({
+      cycleBudgets: 'cycleKey',
+    })
   }
 }
 

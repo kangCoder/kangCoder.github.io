@@ -18,6 +18,12 @@ export interface AssetInput {
   principal?: number
   isLiquidByTarget: boolean
   note?: string
+  /**
+   * 이 잔액이 어느 시점 기준인가 (epoch ms).
+   * 사이클이 끝나는 날에 맞춰 갱신하기 어려우므로 직접 지정할 수 있다.
+   * 비우면 지금 시각으로 둔다.
+   */
+  updatedAt?: number
 }
 
 export async function saveAsset(
@@ -29,8 +35,8 @@ export async function saveAsset(
     name: input.name.trim(),
     balance: Math.trunc(input.balance),
     note: input.note?.trim() || undefined,
-    // 잔액을 언제 갱신했는지가 신뢰도를 좌우한다
-    updatedAt: Date.now(),
+    // 잔액이 언제 기준인지가 이 숫자의 신뢰도를 좌우한다
+    updatedAt: input.updatedAt ?? Date.now(),
   }
   if (id) await financeDb.assets.update(id, value)
   else await financeDb.assets.add({ id: newId(), ...value })

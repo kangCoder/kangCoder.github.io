@@ -23,6 +23,7 @@ const TABLE_NAMES = [
   'goals',
   'netWorthSnapshots',
   'incomeSettings',
+  'cycleBudgets',
 ] as const
 
 type TableName = (typeof TABLE_NAMES)[number]

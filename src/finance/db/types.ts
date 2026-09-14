@@ -100,14 +100,34 @@ export interface Goal {
   note?: string
 }
 
-/** 사이클 종료 시 저장되는 순자산 스냅샷 — 6단계에서 쓴다 */
+/** 순자산 스냅샷 */
 export interface NetWorthSnapshot {
   /** 기본키. 사이클당 한 건이라 다시 찍어도 덮어쓴다 */
   cycleKey: string
   totalAssets: number
   totalDebts: number
   netWorth: number
+  /** 실제로 기록한 시각 */
   capturedAt: number
+  /**
+   * 이 금액이 어느 날 기준인가 ('YYYY-MM-DD').
+   * 사이클이 끝나는 날에 맞춰 자산을 갱신하기 어렵다. 며칠 지나 입력하더라도
+   * 기준일을 남겨 두면 추이 그래프를 읽을 때 근거가 된다.
+   */
+  asOf?: string
+}
+
+/**
+ * 사이클 총예산 — 카테고리 예산 합계와 별도로 잡는다.
+ *
+ * 카테고리별 예산은 항목마다 얼마를 쓸지의 계획이고, 사이클 총예산은
+ * "이번 달 전체로 얼마까지"라는 상한이다. 둘은 다를 수 있다.
+ * 설정하지 않은 사이클은 카테고리 합계를 쓴다.
+ */
+export interface CycleBudget {
+  /** 기본키. "2026-10" */
+  cycleKey: string
+  amount: number
 }
 
 export interface Deduction {

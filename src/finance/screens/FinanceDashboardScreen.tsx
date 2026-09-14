@@ -1,7 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { IconButton } from '../../components/Button'
+import { Button, IconButton } from '../../components/Button'
+import { Sheet } from '../../components/Sheet'
+import { AmountField } from '../components/AmountField'
+import { clearCycleBudget, setCycleBudget } from '../db/cycleBudget'
 import { getCycleSummary, type GroupSpending } from '../db/dashboard'
 import { DEFAULT_PAYDAY, getIncomeSetting } from '../db/income'
 import {
@@ -22,6 +25,7 @@ export function FinanceDashboardScreen() {
   )
   const [offset, setOffset] = useState(0)
   const [expanded, setExpanded] = useState<string>()
+  const [editingBudget, setEditingBudget] = useState(false)
   const cycleKey = shiftCycle(getCurrentCycleKey(payday), offset)
 
   const summary = useLiveQuery(() => getCycleSummary(cycleKey), [cycleKey])
@@ -58,6 +62,16 @@ export function FinanceDashboardScreen() {
         </div>
       </header>
 
+      {editingBudget && summary && (
+        <BudgetSheet
+          cycleKey={cycleKey}
+          amount={summary.expenseBudget}
+          isCustom={summary.budgetIsCustom}
+          categoryTotal={summary.categoryBudgetTotal}
+          onClose={() => setEditingBudget(false)}
+        />
+      )}
+
       {summary === undefined ? null : (
         <>
           <section className="grid grid-cols-2 gap-2 px-4 pt-1 pb-3">
@@ -75,12 +89,14 @@ export function FinanceDashboardScreen() {
                   : 0
               }
             />
-            <Card
-              label="남은 예산"
-              value={formatWon(remainingBudget)}
-              sub={remaining > 0 ? `하루 ${formatWon(perDay)}` : '사이클 종료'}
-              danger={remainingBudget < 0}
-            />
+            <button type="button" onClick={() => setEditingBudget(true)}>
+              <Card
+                label="남은 예산 ✎"
+                value={formatWon(remainingBudget)}
+                sub={remaining > 0 ? `하루 ${formatWon(perDay)}` : '사이클 종료'}
+                danger={remainingBudget < 0}
+              />
+            </button>
             <Card
               label="이번 사이클 저축"
               value={formatWon(summary.savingsRate.saving)}
@@ -116,6 +132,7 @@ export function FinanceDashboardScreen() {
                   <GroupRow
                     key={entry.groupId}
                     entry={entry}
+                    kind="expense"
                     expanded={expanded === entry.groupId}
                     onToggle={() =>
                       setExpanded(
@@ -127,6 +144,29 @@ export function FinanceDashboardScreen() {
               </ul>
             )}
           </section>
+
+          {summary.savingGroups.length > 0 && (
+            <section className="px-4 pb-4">
+              <h2 className="mb-2 text-[13px] font-medium text-zinc-500">
+                저축 · 투자
+              </h2>
+              <ul className="flex flex-col gap-1.5">
+                {summary.savingGroups.map((entry) => (
+                  <GroupRow
+                    key={entry.groupId}
+                    entry={entry}
+                    kind="saving"
+                    expanded={expanded === entry.groupId}
+                    onToggle={() =>
+                      setExpanded(
+                        expanded === entry.groupId ? undefined : entry.groupId,
+                      )
+                    }
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
 
           {summary.goalTarget !== undefined && (
             <section className="px-4 pb-4">
@@ -170,6 +210,59 @@ export function FinanceDashboardScreen() {
   )
 }
 
+function BudgetSheet({
+  cycleKey,
+  amount,
+  isCustom,
+  categoryTotal,
+  onClose,
+}: {
+  cycleKey: string
+  amount: number
+  isCustom: boolean
+  categoryTotal: number
+  onClose: () => void
+}) {
+  const [value, setValue] = useState<number | undefined>(amount)
+
+  return (
+    <Sheet
+      title={`${cycleKey} 사이클 예산`}
+      onClose={onClose}
+      footer={
+        <Button
+          variant="primary"
+          className="w-full"
+          onClick={async () => {
+            await setCycleBudget(cycleKey, value ?? 0)
+            onClose()
+          }}
+        >
+          저장
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <AmountField label="총예산" value={value} onChange={setValue} />
+        <p className="text-[12px] leading-relaxed text-zinc-500">
+          카테고리 예산을 모두 더하면 {formatWon(categoryTotal)}원입니다.
+          사이클 총예산은 그와 별개로 잡을 수 있습니다.
+        </p>
+        {isCustom && (
+          <Button
+            onClick={async () => {
+              await clearCycleBudget(cycleKey)
+              onClose()
+            }}
+          >
+            카테고리 합계로 되돌리기
+          </Button>
+        )}
+      </div>
+    </Sheet>
+  )
+}
+
 /** +12,000 / -3,400 — 지출은 늘면 나쁘므로 색을 뒤집는다 */
 function deltaLabel(delta: number): string {
   if (delta === 0) return '변화 없음'
@@ -178,15 +271,21 @@ function deltaLabel(delta: number): string {
 
 function GroupRow({
   entry,
+  kind,
   expanded,
   onToggle,
 }: {
   entry: GroupSpending
+  /** 지출은 예산을 넘으면 나쁘고, 저축은 더 모으면 좋다 */
+  kind: 'expense' | 'saving'
   expanded: boolean
   onToggle: () => void
 }) {
+  const isSaving = kind === 'saving'
   const over = entry.budget > 0 && entry.spent > entry.budget
   const ratio = entry.budget > 0 ? Math.min(1, entry.spent / entry.budget) : 0
+  // 저축은 목표를 넘겨도 경고가 아니다
+  const alarm = over && !isSaving
 
   return (
     <li className="rounded-xl bg-white p-3 ring-1 ring-zinc-200">
@@ -199,7 +298,13 @@ function GroupRow({
             </span>
           </span>
           <span
-            className={`text-[13px] tabular-nums ${over ? 'font-semibold text-red-600' : 'text-zinc-500'}`}
+            className={`text-[13px] tabular-nums ${
+              alarm
+                ? 'font-semibold text-red-600'
+                : isSaving && over
+                  ? 'font-semibold text-emerald-600'
+                  : 'text-zinc-500'
+            }`}
           >
             {formatWon(entry.spent)}
             {entry.budget > 0 && ` / ${formatWon(entry.budget)}`}
@@ -207,16 +312,24 @@ function GroupRow({
         </div>
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-zinc-100">
           <div
-            className={`h-full ${over ? 'bg-red-500' : 'bg-zinc-900'}`}
+            className={`h-full ${alarm ? 'bg-red-500' : isSaving ? 'bg-emerald-600' : 'bg-zinc-900'}`}
             style={{ width: `${(over ? 1 : ratio) * 100}%` }}
           />
         </div>
         {entry.delta !== 0 && (
           <p
-            className={`mt-1 text-[11px] tabular-nums ${entry.delta > 0 ? 'text-red-500' : 'text-emerald-600'}`}
+            className={`mt-1 text-[11px] tabular-nums ${
+              (entry.delta > 0) === isSaving ? 'text-emerald-600' : 'text-red-500'
+            }`}
           >
             지난 사이클보다 {formatWon(Math.abs(entry.delta))}원{' '}
-            {entry.delta > 0 ? '더 씀' : '덜 씀'}
+            {isSaving
+              ? entry.delta > 0
+                ? '더 모음'
+                : '덜 모음'
+              : entry.delta > 0
+                ? '더 씀'
+                : '덜 씀'}
           </p>
         )}
       </button>
@@ -230,7 +343,11 @@ function GroupRow({
               </span>
               {row.delta !== 0 && (
                 <span
-                  className={`shrink-0 text-[11px] tabular-nums ${row.delta > 0 ? 'text-red-500' : 'text-emerald-600'}`}
+                  className={`shrink-0 text-[11px] tabular-nums ${
+                    (row.delta > 0) === isSaving
+                      ? 'text-emerald-600'
+                      : 'text-red-500'
+                  }`}
                 >
                   {deltaLabel(row.delta)}
                 </span>

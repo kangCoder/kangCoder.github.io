@@ -29,8 +29,10 @@ import {
   saveAsset,
   saveDebt,
 } from '../db/assets'
-import { listSnapshots } from '../db/snapshots'
+import { DEFAULT_PAYDAY, getIncomeSetting } from '../db/income'
+import { captureSnapshot, listSnapshots } from '../db/snapshots'
 import type { Asset, AssetKind, Debt } from '../db/types'
+import { getCycleKey, todayKey } from '../lib/cycle'
 import { formatWon } from '../lib/money'
 
 /** 자산 현황 — §5.4 */
@@ -39,6 +41,12 @@ export function AssetsScreen() {
   const snapshots = useLiveQuery(() => listSnapshots(), [])
   const [editingAsset, setEditingAsset] = useState<Asset | null>()
   const [editingDebt, setEditingDebt] = useState<Debt | null>()
+  const [recording, setRecording] = useState(false)
+  const payday = useLiveQuery(
+    async () => (await getIncomeSetting())?.payday ?? DEFAULT_PAYDAY,
+    [],
+    DEFAULT_PAYDAY,
+  )
 
   if (data === undefined) return null
 
@@ -158,13 +166,20 @@ export function AssetsScreen() {
       )}
 
       {trend.length < 2 && (
-        <section className="px-4 pb-4">
+        <section className="px-4 pb-2">
           <p className="rounded-xl bg-white px-3 py-4 text-center text-[12px] text-zinc-400 ring-1 ring-zinc-200">
-            순자산 추이는 사이클이 끝날 때마다 한 점씩 쌓입니다.
+            순자산 추이는 기록이 쌓일수록 이어집니다.
             {trend.length === 1 && ' (현재 1개)'}
           </p>
         </section>
       )}
+
+      {/* 사이클이 끝나는 날에 맞춰 갱신하기 어려우므로 기준일을 직접 고른다 */}
+      <section className="px-4 pb-4">
+        <Button className="w-full" onClick={() => setRecording(true)}>
+          현재 순자산 기록하기
+        </Button>
+      </section>
 
       <section className="px-4 pb-4">
         <div className="mb-2 flex items-center justify-between">
@@ -196,11 +211,10 @@ export function AssetsScreen() {
                       </span>
                     )}
                   </div>
-                  {asset.note && (
-                    <p className="mt-0.5 truncate text-[11px] text-zinc-400">
-                      {asset.note}
-                    </p>
-                  )}
+                  <p className="mt-0.5 truncate text-[11px] tabular-nums text-zinc-400">
+                    {toDateInput(asset.updatedAt)} 기준
+                    {asset.note && ` · ${asset.note}`}
+                  </p>
                 </div>
                 <span className="shrink-0 text-[15px] font-semibold tabular-nums text-zinc-900">
                   {formatWon(asset.balance)}
@@ -250,6 +264,14 @@ export function AssetsScreen() {
         </ul>
       </section>
 
+      {recording && (
+        <RecordSnapshotSheet
+          netWorth={data.netWorth}
+          payday={payday}
+          onClose={() => setRecording(false)}
+        />
+      )}
+
       {editingAsset !== undefined && (
         <AssetSheet
           asset={editingAsset ?? undefined}
@@ -278,6 +300,9 @@ function AssetSheet({
   const [balance, setBalance] = useState<number | undefined>(asset?.balance)
   const [liquid, setLiquid] = useState(asset?.isLiquidByTarget ?? true)
   const [note, setNote] = useState(asset?.note ?? '')
+  const [asOf, setAsOf] = useState(() =>
+    asset ? toDateInput(asset.updatedAt) : todayKey(),
+  )
   const [error, setError] = useState<string>()
   const [confirming, setConfirming] = useState(false)
 
@@ -293,6 +318,7 @@ function AssetSheet({
         balance: balance ?? 0,
         isLiquidByTarget: liquid,
         note,
+        updatedAt: fromDateInput(asOf),
       },
       asset?.id,
     )
@@ -342,6 +368,15 @@ function AssetSheet({
             </div>
           </div>
           <AmountField label="잔액" value={balance} onChange={setBalance} />
+          <div>
+            <Label hint="이 잔액이 언제 기준인가">기준일</Label>
+            <input
+              type="date"
+              value={asOf}
+              onChange={(e) => setAsOf(e.target.value)}
+              className="min-h-11 w-full rounded-xl bg-white px-3 text-[16px] text-zinc-900 ring-1 ring-zinc-300 outline-none focus:ring-2 focus:ring-zinc-900"
+            />
+          </div>
           <label className="flex min-h-11 items-center gap-2 text-[14px] text-zinc-700">
             <input
               type="checkbox"
@@ -501,6 +536,72 @@ function DebtSheet({ debt, onClose }: { debt?: Debt; onClose: () => void }) {
         />
       )}
     </>
+  )
+}
+
+/** epoch ms ↔ date input. 로컬 기준이라 타임존으로 하루가 밀리지 않는다 */
+function toDateInput(ms: number): string {
+  const date = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function fromDateInput(value: string): number {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, (month ?? 1) - 1, day ?? 1).getTime()
+}
+
+function RecordSnapshotSheet({
+  netWorth,
+  payday,
+  onClose,
+}: {
+  netWorth: number
+  payday: number
+  onClose: () => void
+}) {
+  const [date, setDate] = useState(() => todayKey())
+  const cycleKey = getCycleKey(date, payday)
+
+  return (
+    <Sheet
+      title="순자산 기록"
+      onClose={onClose}
+      footer={
+        <Button
+          variant="primary"
+          className="w-full"
+          onClick={async () => {
+            await captureSnapshot(cycleKey, date)
+            onClose()
+          }}
+        >
+          {cycleKey} 사이클에 기록
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <div className="rounded-xl bg-white p-3 ring-1 ring-zinc-200">
+          <p className="text-[12px] text-zinc-500">현재 순자산</p>
+          <p className="text-[22px] font-semibold tabular-nums text-zinc-900">
+            {formatWon(netWorth)}
+          </p>
+        </div>
+        <div>
+          <Label hint="이 금액이 언제 기준인가">기준일</Label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="min-h-11 w-full rounded-xl bg-white px-3 text-[16px] text-zinc-900 ring-1 ring-zinc-300 outline-none focus:ring-2 focus:ring-zinc-900"
+          />
+        </div>
+        <p className="text-[12px] leading-relaxed text-zinc-500">
+          기준일이 속한 사이클({cycleKey})에 기록됩니다. 같은 사이클에 이미
+          기록이 있으면 덮어씁니다.
+        </p>
+      </div>
+    </Sheet>
   )
 }
 
