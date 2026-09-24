@@ -22,6 +22,7 @@ import {
   setTemplateArchived,
   type TemplateDraftItem,
 } from '../db/templates'
+import { minutesToSeconds, secondsToMinutes } from '../lib/cardio'
 import { ExercisePickerSheet } from './ExercisePickerSheet'
 
 /**
@@ -132,10 +133,12 @@ function TemplateEditor({
         exerciseId: exercise.id,
         exerciseName: exercise.name,
         exerciseType: exercise.type,
-        // CHECKLIST는 볼륨·세트 카운트에서 제외되므로 목표치가 없다(§4.1)
+        // CHECKLIST는 목표치가 없고, CARDIO는 세트·휴식 개념이 없다(§4.1)
         ...(exercise.type === 'CHECKLIST'
           ? {}
-          : { targetSets: 3, restSeconds: 120 }),
+          : exercise.type === 'CARDIO'
+            ? { targetSeconds: 30 * 60 }
+            : { targetSets: 3, restSeconds: 120 }),
       },
     ])
   }
@@ -392,6 +395,19 @@ function DraftRowCard({
             suffix="초"
             value={row.restSeconds}
             onChange={(restSeconds) => onPatch({ restSeconds })}
+          />
+        </div>
+      )}
+
+      {type === 'CARDIO' && (
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <NumberField
+            label="시간"
+            suffix="분"
+            value={secondsToMinutes(row.targetSeconds)}
+            onChange={(minutes) =>
+              onPatch({ targetSeconds: minutesToSeconds(minutes) })
+            }
           />
         </div>
       )}

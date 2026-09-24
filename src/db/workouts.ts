@@ -33,12 +33,15 @@ export interface ConditionInput {
  * 템플릿에서 세션을 시작한다 — §4.3의 스냅샷 복사.
  *
  * TemplateExercise를 WorkoutExercise로 복사하고, 세트를 미리 만들어 둔다.
- * 세트 값의 출처는 두 가지다(§5.1 "미리 채워둔다"):
- *   1순위 — 같은 템플릿의 직전 세션에서 실제로 완료한 세트. 세트 수, 중량,
- *           렙, setType을 그대로 가져오므로 매주 다시 입력할 필요가 없다.
- *   2순위 — 직전 세션이 없거나 완료한 세트가 없으면 템플릿 목표치.
- * 완료 체크가 없던 세트는 수행하지 않은 것이므로 가져오지 않는다.
- * 그렇지 않으면 안 한 세트가 매주 불어난다.
+ * **세트 값은 템플릿 목표치에서만 온다**(§5.1 "미리 채워둔다").
+ *
+ * 한때는 직전 세션의 완료 세트를 우선 복사했다. "매주 다시 입력하지 않는다"는
+ * 얻었지만 **템플릿을 고쳐도 세션에 반영되지 않는** 문제가 생겼다. 템플릿이
+ * 계획을 담는 곳인데 그 계획이 무시되면 편집 화면이 무의미해진다.
+ *
+ * 지금은 세션 종료 시 템플릿 갱신을 제안하므로(§5.1.1) 그쪽으로 해결한다.
+ * 갱신하면 다음 세션이 그 값으로 시작하고, 갱신하지 않으면 계획값이 유지된다.
+ * 어느 쪽이든 **템플릿에 적힌 값이 곧 다음 세션의 시작값**이다.
  *
  * 복사가 끝나면 세션은 템플릿과 완전히 독립이다.
  */
@@ -67,8 +70,6 @@ export async function startWorkoutFromTemplate(
       const exercises = await db.exercises.bulkGet(
         templateItems.map((item) => item.exerciseId),
       )
-
-      const previous = await findPreviousSetsByExercise(templateId)
 
       const workoutId = newId()
       await db.workouts.add({
@@ -101,25 +102,9 @@ export async function startWorkoutFromTemplate(
         // CHECKLIST는 세트 수 카운트에서 제외되므로 세트를 만들지 않는다 — §4.1
         if (exercise.type === 'CHECKLIST') return
 
-        const lastTime = previous.get(exercise.id)
-        if (lastTime && lastTime.length > 0) {
-          lastTime.forEach((set, i) => {
-            workoutSets.push({
-              id: newId(),
-              workoutExerciseId,
-              exerciseId: exercise.id,
-              setNumber: i + 1,
-              setType: set.setType,
-              weight: set.weight,
-              reps: set.reps,
-              seconds: set.seconds,
-              isCompleted: false,
-            })
-          })
-          return
-        }
-
-        const setCount = Math.max(1, item.targetSets ?? 1)
+        // 유산소는 세트 개념이 없다 — 시간 하나만 기록한다
+        const setCount =
+          exercise.type === 'CARDIO' ? 1 : Math.max(1, item.targetSets ?? 1)
         for (let setNumber = 1; setNumber <= setCount; setNumber++) {
           workoutSets.push({
             id: newId(),
@@ -309,10 +294,13 @@ export async function addExerciseToWorkout(
       exerciseName: exercise.name,
       exerciseType: exercise.type,
       sortOrder: (existing.at(-1)?.sortOrder ?? -1) + 1,
-      // 참조할 템플릿 행이 없으므로 템플릿 추가와 같은 기본 휴식을 준다
+      // 참조할 템플릿 행이 없으므로 템플릿 추가와 같은 기본값을 준다.
+      // 유산소는 쉬는 개념이 없어 휴식 타이머를 걸지 않는다(§6.2).
       ...(exercise.type === 'CHECKLIST'
         ? { isChecked: false }
-        : { restSeconds: 120 }),
+        : exercise.type === 'CARDIO'
+          ? {}
+          : { restSeconds: 120 }),
     })
 
     if (exercise.type !== 'CHECKLIST') {
@@ -357,43 +345,6 @@ export async function finishWorkout(
     kneeCondition: condition.kneeCondition,
     note: condition.note?.trim() || undefined,
   })
-}
-
-/**
- * 같은 템플릿의 직전 종료 세션에서, 종목별 완료 세트를 순서대로 모은다.
- * 종목이 매칭되지 않으면(그 사이 템플릿이 바뀌었다면) 그 종목은 빠지고
- * 호출부가 템플릿 목표치로 폴백한다.
- */
-async function findPreviousSetsByExercise(
-  templateId: string,
-): Promise<Map<string, WorkoutSet[]>> {
-  const previous = await db.workouts
-    .orderBy('startedAt')
-    .reverse()
-    .filter(
-      (workout) =>
-        workout.endedAt !== undefined && workout.templateId === templateId,
-    )
-    .first()
-  if (!previous) return new Map()
-
-  const items = await db.workoutExercises
-    .where('workoutId')
-    .equals(previous.id)
-    .toArray()
-  const sets = await db.workoutSets
-    .where('workoutExerciseId')
-    .anyOf(items.map((item) => item.id))
-    .toArray()
-
-  const byExercise = new Map<string, WorkoutSet[]>()
-  for (const item of items) {
-    const own = sets
-      .filter((set) => set.workoutExerciseId === item.id && set.isCompleted)
-      .sort((a, b) => a.setNumber - b.setNumber)
-    if (own.length > 0) byExercise.set(item.exerciseId, own)
-  }
-  return byExercise
 }
 
 /** 주간 리포트용: 세션 하나와 그 안의 종목·세트 전부 */

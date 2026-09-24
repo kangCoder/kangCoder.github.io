@@ -124,6 +124,9 @@ function renderItemRow(
     .map((set) => {
       // 미완료는 "—" — 몇 세트를 못 채웠는지가 보여야 한다
       if (!set.isCompleted) return '—'
+      if (item.exerciseType === 'CARDIO') {
+        return `${Math.round((set.seconds ?? 0) / 60)}분`
+      }
       if (item.exerciseType === 'TIME') return `${set.seconds ?? 0}초`
       return `${trim(set.weight ?? 0)}×${set.reps ?? 0}`
     })

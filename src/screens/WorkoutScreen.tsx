@@ -295,18 +295,20 @@ function WorkoutItemCard({
               />
             ))}
           </ul>
-          <div className="mt-2 flex gap-2">
-            <Button className="flex-1" onClick={() => addWorkoutSet(item.id)}>
-              + 세트
-            </Button>
-            <Button
-              className="flex-1"
-              disabled={item.sets.length === 0}
-              onClick={() => removeLastWorkoutSet(item.id)}
-            >
-              − 마지막 세트
-            </Button>
-          </div>
+          {type !== 'CARDIO' && (
+            <div className="mt-2 flex gap-2">
+              <Button className="flex-1" onClick={() => addWorkoutSet(item.id)}>
+                + 세트
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={item.sets.length === 0}
+                onClick={() => removeLastWorkoutSet(item.id)}
+              >
+                − 마지막 세트
+              </Button>
+            </div>
+          )}
         </>
       )}
     </li>
@@ -319,22 +321,26 @@ function SetRow({
   onToggle,
 }: {
   set: WorkoutSet
-  type: 'WEIGHT_REPS' | 'TIME'
+  type: 'WEIGHT_REPS' | 'TIME' | 'CARDIO'
   onToggle: (next: boolean) => void
 }) {
+  // 유산소는 세트가 하나뿐이라 번호를 매기거나 타입을 바꿀 일이 없다
+  const isCardio = type === 'CARDIO'
   return (
     <li className="flex items-center gap-1.5">
       {/* 세트 번호를 탭하면 워밍업·실패·드롭으로 순환한다 — §7 */}
-      <button
-        type="button"
-        aria-label={`세트 ${set.setNumber} 타입 변경`}
-        onClick={() =>
-          updateWorkoutSet(set.id, { setType: nextSetType(set.setType) })
-        }
-        className={`size-11 shrink-0 rounded-xl text-[13px] font-semibold tabular-nums ${SET_TYPE_CLASS[set.setType]}`}
-      >
-        {SET_TYPE_MARK[set.setType] || set.setNumber}
-      </button>
+      {!isCardio && (
+        <button
+          type="button"
+          aria-label={`세트 ${set.setNumber} 타입 변경`}
+          onClick={() =>
+            updateWorkoutSet(set.id, { setType: nextSetType(set.setType) })
+          }
+          className={`size-11 shrink-0 rounded-xl text-[13px] font-semibold tabular-nums ${SET_TYPE_CLASS[set.setType]}`}
+        >
+          {SET_TYPE_MARK[set.setType] || set.setNumber}
+        </button>
+      )}
 
       {type === 'WEIGHT_REPS' ? (
         <>
@@ -352,6 +358,19 @@ function SetRow({
             onChange={(reps) => updateWorkoutSet(set.id, { reps })}
           />
         </>
+      ) : isCardio ? (
+        <NumberField
+          key={`${set.id}-minutes`}
+          value={
+            set.seconds === undefined ? undefined : Math.round(set.seconds / 60)
+          }
+          suffix="분"
+          onChange={(minutes) =>
+            updateWorkoutSet(set.id, {
+              seconds: minutes === undefined ? undefined : minutes * 60,
+            })
+          }
+        />
       ) : (
         <NumberField
           key={`${set.id}-seconds`}

@@ -7,7 +7,9 @@ import { Button, IconButton } from '../components/Button'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { EmptyState } from '../components/EmptyState'
 import { ExerciseTypeBadge } from '../components/ExerciseTypeBadge'
+import type { ExerciseType } from '../db/types'
 import { SET_TYPE_LABEL } from '../components/setTypeMeta'
+import { getSessionProgress, type ExerciseProgress } from '../db/sessionReview'
 import {
   discardWorkout,
   getWorkout,
@@ -27,10 +29,15 @@ export function WorkoutDetailScreen({ workoutId }: { workoutId: string }) {
 
   const workout = useLiveQuery(() => getWorkout(workoutId), [workoutId])
   const items = useLiveQuery(() => listWorkoutItems(workoutId), [workoutId])
+  // 직전 세션 대비 변화 — 끝난 기록을 다시 볼 때도 진척이 보여야 한다
+  const progress = useLiveQuery(() => getSessionProgress(workoutId), [workoutId])
 
   if (workout === undefined || items === undefined) return null
 
   const durations = exerciseDurations(items, workout.startedAt)
+  const progressByItem = new Map(
+    (progress ?? []).map((row) => [row.workoutExerciseId, row]),
+  )
   const volume = totalVolume(items.flatMap((item) => item.sets))
   const completed = items.reduce(
     (sum, item) => sum + item.sets.filter((set) => set.isCompleted).length,
@@ -93,6 +100,7 @@ export function WorkoutDetailScreen({ workoutId }: { workoutId: string }) {
               key={item.id}
               item={item}
               durationMs={durations.get(item.id)}
+              progress={progressByItem.get(item.id)}
             />
           ))}
         </ul>
@@ -142,9 +150,11 @@ export function WorkoutDetailScreen({ workoutId }: { workoutId: string }) {
 function DetailItemCard({
   item,
   durationMs,
+  progress,
 }: {
   item: WorkoutItem
   durationMs: number | undefined
+  progress: ExerciseProgress | undefined
 }) {
   const done = item.sets.filter((set) => set.isCompleted)
   const volume = totalVolume(item.sets)
@@ -183,20 +193,79 @@ function DetailItemCard({
               {e1rm !== undefined && `e1RM ${e1rm.toFixed(1)}kg`}
             </p>
           )}
+          {progress && (
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 border-t border-zinc-100 pt-1.5 text-[11px] tabular-nums">
+              <Change
+                label="최고 중량"
+                current={progress.topWeight}
+                previous={progress.previousTopWeight}
+                unit="kg"
+              />
+              <Change
+                label="e1RM"
+                current={progress.e1rm}
+                previous={progress.previousE1rm}
+                unit="kg"
+                digits={1}
+              />
+            </div>
+          )}
         </>
       )}
     </li>
   )
 }
 
+/** 직전 세션 대비. 비교할 기록이 없으면 "첫 기록"이라고만 적는다. */
+function Change({
+  label,
+  current,
+  previous,
+  unit,
+  digits = 0,
+}: {
+  label: string
+  current: number | undefined
+  previous: number | undefined
+  unit: string
+  digits?: number
+}) {
+  if (current === undefined) return null
+  if (previous === undefined) {
+    return (
+      <span className="text-zinc-400">
+        {label} 첫 기록
+      </span>
+    )
+  }
+  const diff = Math.round((current - previous) * 10 ** digits) / 10 ** digits
+  return (
+    <span
+      className={
+        diff > 0
+          ? 'text-emerald-600'
+          : diff < 0
+            ? 'text-red-500'
+            : 'text-zinc-400'
+      }
+    >
+      {label} {diff > 0 ? '+' : ''}
+      {diff.toFixed(digits)}
+      {unit}
+      <span className="text-zinc-300"> (이전 {previous.toFixed(digits)})</span>
+    </span>
+  )
+}
+
 function describeSet(
   set: { weight?: number; reps?: number; seconds?: number; setType: string },
-  type: 'WEIGHT_REPS' | 'TIME' | 'CHECKLIST',
+  type: ExerciseType,
 ): string {
   const mark =
     set.setType === 'NORMAL'
       ? ''
       : `(${SET_TYPE_LABEL[set.setType as keyof typeof SET_TYPE_LABEL]})`
+  if (type === 'CARDIO') return `${Math.round((set.seconds ?? 0) / 60)}분${mark}`
   if (type === 'TIME') return `${set.seconds ?? 0}초${mark}`
   return `${set.weight ?? 0}×${set.reps ?? 0}${mark}`
 }

@@ -6,8 +6,18 @@
  * 예외는 Bodyweight.date로, 하루에 한 건이므로 'yyyy-MM-dd' 문자열을 기본키로 쓴다.
  */
 
-/** §4.1 — 3종 확정. BODYWEIGHT_REPS와 DISTANCE_TIME은 의도적으로 제외했다. */
-export type ExerciseType = 'WEIGHT_REPS' | 'TIME' | 'CHECKLIST'
+/**
+ * §4.1 — BODYWEIGHT_REPS는 의도적으로 제외했다(kg 칸에 추가 중량을 넣으면 된다).
+ *
+ * TIME과 CARDIO를 나눈 이유 — 플랭크는 초 단위로 여러 세트를 하지만,
+ * 유산소는 분 단위로 한 번 한다. 입력 단위와 세트 유무가 모두 달라서
+ * 한 타입으로 묶으면 화면이 둘 다 어정쩡해진다.
+ */
+export type ExerciseType =
+  | 'WEIGHT_REPS'
+  | 'TIME'
+  | 'CHECKLIST'
+  | 'CARDIO'
 
 /** §7 — 워밍업을 본세트와 구분하지 않으면 볼륨 그래프가 오염된다. */
 export type SetType = 'WARMUP' | 'NORMAL' | 'FAILURE' | 'DROP'
@@ -36,6 +46,7 @@ export interface Template {
  * 목표치 필드는 종목 타입에 따라 일부만 쓰인다:
  *   WEIGHT_REPS → targetSets/targetReps/targetWeight
  *   TIME        → targetSets/targetSeconds
+ *   CARDIO      → targetSeconds (분 단위로 입력받아 초로 저장)
  *   CHECKLIST   → 목표치 없음
  */
 export interface TemplateExercise {
