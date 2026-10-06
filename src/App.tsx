@@ -13,6 +13,7 @@ import { AppSwitcher } from './components/AppSwitcher'
 import { getAppSettings } from './db/appSettings'
 import { AppSettingsScreen } from './screens/AppSettingsScreen'
 import { AssetsScreen } from './finance/screens/AssetsScreen'
+import { BudgetPlanScreen } from './finance/screens/BudgetPlanScreen'
 import { CategoryManageScreen } from './finance/screens/CategoryManageScreen'
 import { CycleReportScreen } from './finance/screens/CycleReportScreen'
 import { SimulatorScreen } from './finance/screens/SimulatorScreen'
@@ -84,6 +85,7 @@ function AppShell() {
             <Route path="new" element={<TransactionFormScreen />} />
             <Route path="fixed" element={<FixedCostScreen />} />
             <Route path="categories" element={<CategoryManageScreen />} />
+            <Route path="budget" element={<BudgetPlanScreen />} />
             <Route path="report" element={<CycleReportScreen />} />
             <Route path="assets" element={<AssetsScreen />} />
             <Route path="goal" element={<GoalDetailScreen />} />

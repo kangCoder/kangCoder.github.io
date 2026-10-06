@@ -4,7 +4,7 @@
 
 # 가계부 기능
 
-`docs/spec-finance-v0.10.md` 참조. 운동 기록과 독립 모듈이며
+`docs/spec-finance-v0.11.md` 참조. 운동 기록과 독립 모듈이며
 기존 운동 코드는 수정하지 않는다. Dexie DB를 분리한다(`finance-log`).
 
 ## 명령어

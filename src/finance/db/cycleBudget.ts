@@ -1,3 +1,4 @@
+import { getCycleCategoryBudgets } from './budgetPlan'
 import { listCategories } from './categories'
 import { financeDb } from './db'
 
@@ -19,13 +20,18 @@ export interface CycleBudgetInfo {
 export async function getCycleBudget(
   cycleKey: string,
 ): Promise<CycleBudgetInfo> {
-  const [custom, categories] = await Promise.all([
+  const [custom, categories, planned] = await Promise.all([
     financeDb.cycleBudgets.get(cycleKey),
     listCategories(false),
+    getCycleCategoryBudgets(cycleKey),
   ])
+  // 그 사이클에 정한 값이 있으면 그것들의 합이 기준이다
   const categoryTotal = categories
     .filter((category) => category.type === 'EXPENSE')
-    .reduce((sum, category) => sum + category.budget, 0)
+    .reduce(
+      (sum, category) => sum + (planned.get(category.id) ?? category.budget),
+      0,
+    )
 
   return {
     amount: custom?.amount ?? categoryTotal,

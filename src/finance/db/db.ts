@@ -1,8 +1,10 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type {
+  AppliedDeduction,
   Asset,
   Category,
   CycleBudget,
+  CycleCategoryBudget,
   Debt,
   FixedCost,
   Goal,
@@ -33,6 +35,8 @@ class FinanceDB extends Dexie {
   netWorthSnapshots!: EntityTable<NetWorthSnapshot, 'cycleKey'>
   incomeSettings!: EntityTable<IncomeSetting, 'id'>
   cycleBudgets!: EntityTable<CycleBudget, 'cycleKey'>
+  cycleCategoryBudgets!: EntityTable<CycleCategoryBudget, 'id'>
+  appliedDeductions!: EntityTable<AppliedDeduction, 'id'>
 
   constructor() {
     super('finance-log')
@@ -89,6 +93,15 @@ class FinanceDB extends Dexie {
     /** v3 — 사이클별 총예산. 기존 데이터는 건드리지 않는다. */
     this.version(3).stores({
       cycleBudgets: 'cycleKey',
+    })
+
+    /**
+     * v4 — 사이클별 카테고리 예산과 원천 차감 적용 기록.
+     * 둘 다 "그 사이클에 무엇을 정했/적용했나"를 남기는 용도다.
+     */
+    this.version(4).stores({
+      cycleCategoryBudgets: 'id, cycleKey, categoryId',
+      appliedDeductions: 'id, cycleKey',
     })
   }
 }

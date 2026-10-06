@@ -1,5 +1,6 @@
 import { shiftCycle } from '../lib/cycle'
 import { calculateSavingsRate, type SavingsRate } from '../lib/savingsRate'
+import { getCycleCategoryBudgets } from './budgetPlan'
 import { listCategories } from './categories'
 import { getCycleBudget } from './cycleBudget'
 import { financeDb } from './db'
@@ -56,6 +57,8 @@ export interface CycleSummary {
   byGroup: GroupSpending[]
   /** 저축·투자·원금상환 그룹 */
   savingGroups: GroupSpending[]
+  /** 이 사이클 예산을 따로 정했는가 — 안 했으면 설정을 권한다 */
+  isPlanned: boolean
   netWorth: number
   goalTarget: number | undefined
   goalName: string | undefined
@@ -73,8 +76,17 @@ export async function getCycleSummary(cycleKey: string): Promise<CycleSummary> {
   const netPay = income?.netPay ?? 0
   const previousCycle = shiftCycle(cycleKey, -1)
 
-  const [current, previous, categories, groups, assets, debts, goal, budget] =
-    await Promise.all([
+  const [
+    current,
+    previous,
+    categories,
+    groups,
+    assets,
+    debts,
+    goal,
+    budget,
+    planned,
+  ] = await Promise.all([
       financeDb.transactions.where('cycleKey').equals(cycleKey).toArray(),
       financeDb.transactions.where('cycleKey').equals(previousCycle).toArray(),
       listCategories(false),
@@ -83,7 +95,12 @@ export async function getCycleSummary(cycleKey: string): Promise<CycleSummary> {
       financeDb.debts.toArray(),
       financeDb.goals.toArray().then((goals) => goals[0]),
       getCycleBudget(cycleKey),
+      getCycleCategoryBudgets(cycleKey),
     ])
+
+  // 그 사이클에 정한 값이 있으면 그것을 쓴다. 없으면 Category.budget이 기준이다.
+  const budgetOf = (category: Category) =>
+    planned.get(category.id) ?? category.budget
 
   const sumOf = (rows: Transaction[], type: Transaction['type']) =>
     rows
@@ -115,11 +132,16 @@ export async function getCycleSummary(cycleKey: string): Promise<CycleSummary> {
     budgetIsCustom: budget.isCustom,
     categoryBudgetTotal: budget.categoryTotal,
     savingsRate,
-    byGroup: buildGroups(current, previous, categories, groups, ['EXPENSE']),
-    savingGroups: buildGroups(current, previous, categories, groups, [
-      'SAVING',
-      'TRANSFER',
-    ]),
+    byGroup: buildGroups(current, previous, categories, groups, ['EXPENSE'], budgetOf),
+    savingGroups: buildGroups(
+      current,
+      previous,
+      categories,
+      groups,
+      ['SAVING', 'TRANSFER'],
+      budgetOf,
+    ),
+    isPlanned: planned.size > 0,
     netWorth:
       assets.reduce((sum, asset) => sum + asset.balance, 0) -
       debts.reduce((sum, debt) => sum + debt.balance, 0),
@@ -138,6 +160,7 @@ function buildGroups(
   categories: Category[],
   groups: Group[],
   types: Transaction['type'][],
+  budgetOf: (category: Category) => number,
 ): GroupSpending[] {
   const spentOf = (rows: Transaction[], categoryId: string) =>
     rows
@@ -161,7 +184,7 @@ function buildGroups(
         categoryId: category.id,
         name: category.name,
         spent,
-        budget: category.budget,
+        budget: budgetOf(category),
         delta: spent - spentOf(previous, category.id),
       }
     })

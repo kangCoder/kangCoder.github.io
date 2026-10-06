@@ -49,7 +49,7 @@ export interface Category {
   isArchived: boolean
 }
 
-/** 매월 반복되는 고정비 — 사이클 시작 시 Transaction을 자동 생성한다 */
+/** 매월 반복되는 고정비 — 사이클에 반영하면 Transaction이 된다 */
 export interface FixedCost {
   id: string
   categoryId: string
@@ -60,6 +60,13 @@ export interface FixedCost {
   startCycle: string
   endCycle?: string
   note?: string
+  /**
+   * 이 고정비가 갚는 부채. 사이클에 반영할 때 잔액을 그만큼 줄인다.
+   * 매달 수동으로 잔액을 고치지 않아도 되게 하려는 연결이다.
+   */
+  linkedDebtId?: string
+  /** 이 고정비가 쌓는 자산. 반영할 때 잔액을 그만큼 늘린다. */
+  linkedAssetId?: string
 }
 
 export interface Asset {
@@ -138,6 +145,42 @@ export interface Deduction {
    * 저축률의 분자와 총소득 분모를 여기서 만든다(§2.3.1).
    */
   isTransfer: boolean
+  /**
+   * 이 공제가 갚는 부채. 급여에서 바로 빠지므로 Transaction은 만들지 않지만
+   * (§2.3.1 이중 계산 방지) 부채 잔액은 줄어야 한다.
+   */
+  linkedDebtId?: string
+}
+
+/**
+ * 원천 차감분을 어느 사이클에 이미 적용했는지.
+ *
+ * 고정비는 Transaction 존재 여부로 중복을 막지만(§5.6), 원천 차감은
+ * Transaction을 만들지 않아 판단 근거가 없다. 그래서 따로 기록한다.
+ */
+export interface AppliedDeduction {
+  /** 기본키. `${cycleKey}:${label}` */
+  id: string
+  cycleKey: string
+  label: string
+  debtId: string
+  amount: number
+  appliedAt: number
+}
+
+/**
+ * 사이클별 카테고리 예산 스냅샷.
+ *
+ * Category.budget은 값이 하나뿐이라 매달 예산을 바꾸면 과거 사이클의
+ * "예산 대비 실적"까지 새 예산으로 평가된다. 사이클마다 그때 정한 값을
+ * 남겨 두면 과거 리포트가 변하지 않는다.
+ */
+export interface CycleCategoryBudget {
+  /** 기본키. `${cycleKey}:${categoryId}` */
+  id: string
+  cycleKey: string
+  categoryId: string
+  amount: number
 }
 
 /** 소득 설정 — id가 'default'인 단일 레코드 */

@@ -16,6 +16,7 @@ import {
   type FinanceBackup,
 } from '../db/backup'
 import { DEFAULT_PAYDAY, getIncomeSetting, saveIncomeSetting } from '../db/income'
+import { listDebts } from '../db/assets'
 import { recalculateAllCycleKeys } from '../db/transactions'
 import type { Deduction } from '../db/types'
 import { sumWithheldTransfer } from '../lib/savingsRate'
@@ -64,6 +65,7 @@ function IncomeSection({
   const [deductions, setDeductions] = useState<Deduction[]>(initialDeductions)
   const [pendingPayday, setPendingPayday] = useState<number>()
   const [message, setMessage] = useState<string>()
+  const debts = useLiveQuery(() => listDebts(), [])
 
   function patchDeduction(index: number, patch: Partial<Deduction>) {
     setDeductions((current) =>
@@ -184,6 +186,40 @@ function IncomeSection({
               </li>
             ))}
           </ul>
+
+          {/* 원금 공제는 부채를 줄인다. 연결해 두면 잔액이 자동 갱신된다. */}
+          {deductions.some((deduction) => deduction.isTransfer) && (
+            <div className="mt-2 flex flex-col gap-1.5">
+              <Label hint="고정비 반영 시 잔액이 함께 줄어든다">
+                원금 공제의 부채 연결
+              </Label>
+              {deductions.map((deduction, index) =>
+                deduction.isTransfer ? (
+                  <div key={index} className="flex items-center gap-2">
+                    <span className="w-24 shrink-0 truncate text-[13px] text-zinc-600">
+                      {deduction.label || '(이름 없음)'}
+                    </span>
+                    <select
+                      value={deduction.linkedDebtId ?? ''}
+                      onChange={(e) =>
+                        patchDeduction(index, {
+                          linkedDebtId: e.target.value || undefined,
+                        })
+                      }
+                      className="min-h-11 min-w-0 flex-1 rounded-xl bg-white px-2 text-[14px] ring-1 ring-zinc-300 outline-none focus:ring-2 focus:ring-zinc-900"
+                    >
+                      <option value="">연결 안 함</option>
+                      {(debts ?? []).map((debt) => (
+                        <option key={debt.id} value={debt.id}>
+                          {debt.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null,
+              )}
+            </div>
+          )}
           <Button
             className="mt-2 w-full"
             onClick={() =>
@@ -308,6 +344,9 @@ function LinkSection() {
       <div className="flex flex-col gap-2 rounded-xl bg-white p-3 ring-1 ring-zinc-200">
         <Link to="/finance/categories">
           <Button className="w-full">카테고리 · 그룹 관리</Button>
+        </Link>
+        <Link to="/finance/budget">
+          <Button className="w-full">예산 설정</Button>
         </Link>
         <Link to="/finance/fixed">
           <Button className="w-full">고정비 관리</Button>

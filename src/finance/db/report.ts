@@ -1,4 +1,5 @@
 import { shiftCycle } from '../lib/cycle'
+import { getCycleCategoryBudgets } from './budgetPlan'
 import { listCategories } from './categories'
 import { financeDb } from './db'
 import type { Transaction } from './types'
@@ -33,11 +34,13 @@ export interface CycleReport {
 export async function getCycleReport(cycleKey: string): Promise<CycleReport> {
   const previousCycle = shiftCycle(cycleKey, -1)
 
-  const [current, previous, categories, groups] = await Promise.all([
+  const [current, previous, categories, groups, planned] = await Promise.all([
     financeDb.transactions.where('cycleKey').equals(cycleKey).toArray(),
     financeDb.transactions.where('cycleKey').equals(previousCycle).toArray(),
     listCategories(false),
     financeDb.groups.toArray(),
+    // 그 사이클에 정한 예산으로 평가해야 과거 리포트가 변하지 않는다
+    getCycleCategoryBudgets(cycleKey),
   ])
 
   const groupName = new Map(groups.map((group) => [group.id, group.name]))
@@ -50,14 +53,15 @@ export async function getCycleReport(cycleKey: string): Promise<CycleReport> {
     .filter((category) => category.type === 'EXPENSE')
     .map((category) => {
       const spent = spentOf(current, category.id)
+      const budget = planned.get(category.id) ?? category.budget
       return {
         categoryId: category.id,
         name: category.name,
         group: groupName.get(category.groupId) ?? '기타',
         isFixed: category.isFixed,
-        budget: category.budget,
+        budget,
         spent,
-        diff: category.budget - spent,
+        diff: budget - spent,
         delta: spent - spentOf(previous, category.id),
       }
     })

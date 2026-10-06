@@ -74,6 +74,26 @@ export function FinanceDashboardScreen() {
 
       {summary === undefined ? null : (
         <>
+          {/* 예산을 아직 안 정했으면 먼저 권한다 */}
+          {!summary.isPlanned && (
+            <section className="px-4 pt-1 pb-2">
+              <Link
+                to={`/finance/budget?cycle=${cycleKey}`}
+                className="flex items-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-white active:bg-zinc-700"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-semibold">
+                    {cycleKey} 예산 설정하기
+                  </p>
+                  <p className="text-[12px] text-zinc-400">
+                    카테고리마다 이번 달 쓸 금액을 정합니다
+                  </p>
+                </div>
+                <span className="shrink-0 text-[14px]">→</span>
+              </Link>
+            </section>
+          )}
+
           <section className="grid grid-cols-2 gap-2 px-4 pt-1 pb-3">
             <Card
               label="이번 사이클 지출"
@@ -115,12 +135,20 @@ export function FinanceDashboardScreen() {
               <h2 className="text-[13px] font-medium text-zinc-500">
                 그룹별 예산
               </h2>
-              <Link
-                to="/finance/report"
-                className="text-[13px] font-medium text-zinc-900 underline underline-offset-2"
-              >
-                사이클 리포트
-              </Link>
+              <div className="flex gap-3">
+                <Link
+                  to={`/finance/budget?cycle=${cycleKey}`}
+                  className="text-[13px] font-medium text-zinc-500 underline underline-offset-2"
+                >
+                  예산 설정
+                </Link>
+                <Link
+                  to="/finance/report"
+                  className="text-[13px] font-medium text-zinc-900 underline underline-offset-2"
+                >
+                  사이클 리포트
+                </Link>
+              </div>
             </div>
             {summary.byGroup.length === 0 ? (
               <p className="rounded-xl bg-white px-3 py-6 text-center text-[13px] text-zinc-400 ring-1 ring-zinc-200">

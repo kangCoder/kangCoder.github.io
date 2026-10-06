@@ -6,8 +6,11 @@ import { EmptyState } from '../../components/EmptyState'
 import { Sheet } from '../../components/Sheet'
 import { Label, NumberField, TextField } from '../../components/fields'
 import { AmountField } from '../components/AmountField'
+import { listAssets, listDebts } from '../db/assets'
 import { listCategories } from '../db/categories'
 import {
+  applyWithheldDeductions,
+  countAppliedDeductions,
   createFixedCost,
   deleteFixedCost,
   ensureFixedCostTransactions,
@@ -29,13 +32,31 @@ export function FixedCostScreen() {
   const items = useLiveQuery(() => listFixedCosts(), [])
   const [editing, setEditing] = useState<FixedCostItem>()
   const [adding, setAdding] = useState(false)
-  const [applied, setApplied] = useState<number>()
-
-  async function applyToCycle() {
-    setApplied(await ensureFixedCostTransactions(currentCycle, payday))
-  }
+  const [message, setMessage] = useState<string>()
 
   const currentCycle = getCurrentCycleKey(payday)
+  const withheldCount = useLiveQuery(
+    () => countAppliedDeductions(currentCycle),
+    [currentCycle],
+  )
+
+  async function applyToCycle() {
+    const result = await ensureFixedCostTransactions(currentCycle, payday)
+    const deductions = await applyWithheldDeductions(currentCycle)
+
+    const parts: string[] = []
+    if (result.created > 0) parts.push(`거래 ${result.created}건`)
+    if (result.debtsUpdated > 0) parts.push(`부채 ${result.debtsUpdated}건`)
+    if (result.assetsUpdated > 0) parts.push(`자산 ${result.assetsUpdated}건`)
+    if (deductions > 0) parts.push(`원천 차감 ${deductions}건`)
+
+    setMessage(
+      parts.length === 0
+        ? '이미 전부 반영되어 있습니다.'
+        : `${parts.join(' · ')}을 반영했습니다.`,
+    )
+  }
+
   // 12개월 안에 끝나는 고정비는 미리 알려준다 — 이후 여력이 그만큼 생긴다
   const horizon = shiftCycle(currentCycle, 12)
   const active = (items ?? []).filter((item) => item.isActive)
@@ -64,12 +85,15 @@ export function FixedCostScreen() {
           <Button variant="primary" className="w-full" onClick={applyToCycle}>
             이번 사이클에 반영
           </Button>
-          <p className="mt-1 text-[11px] text-zinc-400">
-            {applied === undefined
-              ? '활성 고정비를 이번 사이클 거래로 만듭니다. 이미 만든 항목은 건너뜁니다.'
-              : applied === 0
-                ? '이미 전부 반영되어 있습니다.'
-                : `${applied}건을 거래로 만들었습니다.`}
+          <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+            {message ??
+              '활성 고정비를 이번 사이클 거래로 만들고, 연결된 부채·자산 잔액도 함께 갱신합니다. 이미 반영한 항목은 건너뜁니다.'}
+            {withheldCount !== undefined && withheldCount > 0 && (
+              <span className="text-zinc-500">
+                {' '}
+                이번 사이클 원천 차감 {withheldCount}건 적용됨.
+              </span>
+            )}
           </p>
         </section>
       )}
@@ -119,6 +143,12 @@ export function FixedCostScreen() {
                   매월 {item.dayOfMonth}일
                   {item.endCycle && ` · ${item.endCycle} 종료`}
                 </p>
+                {(item.linkedDebt || item.linkedAsset) && (
+                  <p className="text-[11px] text-sky-700">
+                    ↳ {item.linkedDebt?.name ?? item.linkedAsset?.name} 잔액
+                    자동 갱신
+                  </p>
+                )}
               </button>
               <span className="shrink-0 text-[15px] font-semibold tabular-nums text-zinc-900">
                 {formatWon(item.amount)}
@@ -161,13 +191,23 @@ function FixedCostSheet({
   const [amount, setAmount] = useState<number | undefined>(item.amount)
   const [day, setDay] = useState<number | undefined>(item.dayOfMonth)
   const [endCycle, setEndCycle] = useState(item.endCycle ?? '')
+  const [link, setLink] = useState(
+    item.linkedDebtId
+      ? `debt:${item.linkedDebtId}`
+      : item.linkedAssetId
+        ? `asset:${item.linkedAssetId}`
+        : '',
+  )
   const [confirming, setConfirming] = useState(false)
 
   async function save() {
+    const [kind, id] = link.split(':')
     await updateFixedCost(item.id, {
       amount: amount ?? item.amount,
       dayOfMonth: Math.min(31, Math.max(1, day ?? item.dayOfMonth)),
       endCycle: endCycle.trim() || undefined,
+      linkedDebtId: kind === 'debt' ? id : undefined,
+      linkedAssetId: kind === 'asset' ? id : undefined,
     })
     onClose()
   }
@@ -205,6 +245,7 @@ function FixedCostSheet({
           onChange={setEndCycle}
           placeholder="예: 2027-10 (비우면 계속)"
         />
+        <BalanceLinkField value={link} onChange={setLink} />
         <p className="text-[12px] text-zinc-400">
           이번 사이클에 이미 생성된 거래는 바뀌지 않습니다. 다음 사이클부터
           반영됩니다.
@@ -245,6 +286,7 @@ function NewFixedCostSheet({
   const [amount, setAmount] = useState<number>()
   const [day, setDay] = useState<number | undefined>(1)
   const [endCycle, setEndCycle] = useState('')
+  const [link, setLink] = useState('')
   const [error, setError] = useState<string>()
 
   const options = (categories ?? []).filter((c) => c.type !== 'INCOME')
@@ -258,12 +300,15 @@ function NewFixedCostSheet({
       setError('금액을 입력하세요')
       return
     }
+    const [kind, id] = link.split(':')
     await createFixedCost({
       categoryId,
       amount,
       dayOfMonth: Math.min(31, Math.max(1, day ?? 1)),
       startCycle,
       endCycle: endCycle.trim() || undefined,
+      linkedDebtId: kind === 'debt' ? id : undefined,
+      linkedAssetId: kind === 'asset' ? id : undefined,
     })
     onClose()
   }
@@ -305,11 +350,60 @@ function NewFixedCostSheet({
           onChange={setEndCycle}
           placeholder="예: 2027-10 (비우면 계속)"
         />
+        <BalanceLinkField value={link} onChange={setLink} />
         <p className="text-[12px] text-zinc-400">
-          {startCycle} 사이클부터 매달 자동으로 거래가 만들어집니다.
+          {startCycle} 사이클부터 [이번 사이클에 반영]으로 거래를 만듭니다.
         </p>
         {error && <p className="text-[13px] text-red-600">{error}</p>}
       </div>
     </Sheet>
+  )
+}
+
+/**
+ * 이 고정비가 어느 부채·자산의 잔액을 움직이는지.
+ *
+ * 매달 고정으로 빠지거나 들어오는 돈인데 잔액을 손으로 고쳐야 하면
+ * 자산 화면이 금방 낡는다. 연결해 두면 반영할 때 함께 갱신된다.
+ */
+function BalanceLinkField({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (value: string) => void
+}) {
+  const debts = useLiveQuery(() => listDebts(), [])
+  const assets = useLiveQuery(() => listAssets(), [])
+
+  return (
+    <div>
+      <Label hint="반영할 때 잔액이 함께 바뀐다">잔액 연결</Label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="min-h-11 w-full rounded-xl bg-white px-3 text-[16px] text-zinc-900 ring-1 ring-zinc-300 outline-none focus:ring-2 focus:ring-zinc-900"
+      >
+        <option value="">연결 안 함</option>
+        {(debts ?? []).length > 0 && (
+          <optgroup label="부채 (잔액 감소)">
+            {(debts ?? []).map((debt) => (
+              <option key={debt.id} value={`debt:${debt.id}`}>
+                {debt.name}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {(assets ?? []).length > 0 && (
+          <optgroup label="자산 (잔액 증가)">
+            {(assets ?? []).map((asset) => (
+              <option key={asset.id} value={`asset:${asset.id}`}>
+                {asset.name}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+    </div>
   )
 }
