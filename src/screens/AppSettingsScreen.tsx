@@ -13,6 +13,7 @@ import {
   type WorkoutBackup,
 } from '../db/backup'
 import { accountName, signOutAccount } from '../sync/auth'
+import { SyncSection } from './SyncSection'
 import { useAuthUser } from '../sync/useAuthUser'
 
 /**
@@ -106,6 +107,7 @@ export function AppSettingsScreen() {
         </p>
       </section>
 
+      <SyncSection />
       <BackupSection />
     </div>
   )

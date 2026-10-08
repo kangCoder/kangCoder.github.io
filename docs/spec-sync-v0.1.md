@@ -143,8 +143,15 @@ users/{uid}/snapshots/{area}/tables/{tableName}
   gz: Bytes                    # gzip된 JSON 배열
 
 users/{uid}/snapshots/{area}/history/{rev}
-  rev, dbVersion, updatedAt, deviceLabel, tables: { [name]: Bytes }
+  rev, dbVersion, updatedAt, deviceLabel, tableNames: string[]
+
+users/{uid}/snapshots/{area}/history/{rev}/tables/{tableName}
+  gz: Bytes
 ```
+
+이력도 **테이블당 문서로 쪼갠다.** 한 문서에 모든 테이블을 담으면 §3.2의
+1 MiB 한도에 그대로 다시 부딪힌다. 가지치기는 `tableNames`가 적혀 있어
+목록 조회 없이 그 rev의 문서들을 지울 수 있다. (이력은 5단계다)
 
 ### 3.1 왜 area를 나누는가
 
@@ -319,6 +326,20 @@ for (const table of db.tables) {
 때는, **덮기 전에 로컬 스냅샷을 `history/local-{timestamp}`로 먼저 올린다.**
 
 PIN 재설정이 불가능한 설계라서, 유실이 복구 가능하다는 보장이 특히 중요하다.
+
+### 5.4-a 실측 (3단계 구현 후)
+
+`npm run check:snapshot`이 측정한 값이다.
+
+| 데이터 | 비압축 | gzip | 비율 |
+|---|---|---|---|
+| 세트 5,000건 | 821 KB | 53 KB | 15.6배 |
+| 세트 62,400건 (10년 추정) | 10.2 MB | **643 KB** | 16.3배 |
+
+§3.2의 전제가 확인됐다 — 테이블 분할 + gzip이면 10년치가 1 MiB 안에 들어간다.
+다만 643 KB는 한도의 63%다. 15년쯤에서 넘길 것이므로 `push`가 테이블 하나가
+800 KB를 넘기면 결과에 경고를 실어 보낸다. 그 경고가 뜨면 연도별 샤딩을
+v0.2로 설계한다.
 
 ### 5.5 언제 도는가
 
@@ -502,10 +523,12 @@ push 30회 × 문서 25개 = 750 쓰기. 한 자릿수 퍼센트다.
 | `src/sync/firebase.ts` | 앱 초기화, Auth·Firestore 인스턴스 (persistence 끔) |
 | `src/sync/auth.ts` | 이름 정규화, 합성 이메일·비밀번호, 로그인/등록/로그아웃 |
 | `src/sync/useAuthUser.ts` | 로그인 상태 훅 — misconfigured/loading/signedOut/signedIn |
-| `src/sync/snapshot.ts` | gzip 인코딩·디코딩, 테이블 묶기/풀기 |
-| `src/sync/engine.ts` | pull / push(CAS) / 훅 등록 / 디바운스 / 이벤트 배선 |
+| `src/sync/snapshot.ts` | 테이블 하나의 gzip 인코딩·디코딩, 비압축 폴백 |
+| `src/sync/engine.ts` | pull / push(CAS) / 전체 교체 |
+| `src/screens/SyncSection.tsx` | 수동 동기화 UI (3단계). 4단계에서 자동이 붙어도 남는다 |
+| `scripts/check-snapshot.ts` | 인코딩 하네스 (`npm run check:snapshot`) |
 | `src/sync/syncState.ts` | §4 스토어 접근 + §7.3 `ensureSyncState` (area 양쪽 공용) |
-| `src/sync/area.ts` | area 어댑터 — `{ name, db, tableNames }` 두 개 |
+| `src/sync/area.ts` | area 어댑터 — `{ id, label, db, tableNames, userDataTables }` 두 개 |
 | `src/screens/LoginScreen.tsx` | 이름 + PIN, 새 이름으로 시작하기 |
 | `src/screens/SyncConflictSheet.tsx` | §6 모달 |
 | `src/screens/ConfigErrorScreen.tsx` | env 누락 시 어느 키가 비었는지 띄운다 — §3.5 |
@@ -542,9 +565,15 @@ push 30회 × 문서 25개 = 750 쓰기. 한 자릿수 퍼센트다.
 
 CLAUDE.md의 "한 번에 한 화면씩"에 맞춰 나눈다.
 
-1. `syncState` 스토어 + 운동 `backup.ts` (동기화 없이, 백업 UI로 검증)
-2. Firebase 프로젝트·규칙·env 배선, `firebase.ts` + `auth.ts` + LoginScreen
-3. `snapshot.ts` + push/pull (수동 버튼만. 자동 없음)
+1. `syncState` 스토어 + 운동 `backup.ts` (동기화 없이, 백업 UI로 검증) — **완료**
+2. Firebase 프로젝트·규칙·env 배선, `firebase.ts` + `auth.ts` + LoginScreen — **완료**
+3. `snapshot.ts` + push/pull (수동 버튼만. 자동 없음) — **완료**
+
+   수동으로 먼저 두는 이유: push/pull과 CAS 가드를 눈으로 확인하고 넘어가야
+   한다. 자동부터 붙이면 무엇이 언제 돌았는지 알 수 없다. 이 단계에서
+   `push`는 `dirty`가 false면 올리지 않는다 — 막 로그인한 빈 기기에서 눌러
+   원격의 실제 기록을 빈 스냅샷으로 덮는 사고를 막는다(원격이 비어 있을
+   때만 예외).
 4. 훅 기반 dirty + 디바운스 자동 동기화
 5. 충돌 모달(§6) + 이력(§5.4)
 6. 부트스트랩 순서 변경(§7), 로그아웃(§7.2)
