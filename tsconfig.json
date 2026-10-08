@@ -1,5 +1,8 @@
 {
   "files": [],
+  /* tsconfig.scripts.json 은 의도적으로 참조하지 않는다 — docs/spec-sync-v0.1.md §10
+     하네스는 배포 산출물이 아니고, 빌드 그래프에 넣으면 scripts와 app이 같은
+     src 파일을 공유해 `tsc -b`가 끝나지 않는다. `npm run typecheck`가 따로 본다. */
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }

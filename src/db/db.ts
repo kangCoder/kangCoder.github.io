@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { AppSettings } from './appSettings'
+import type { SyncState } from '../sync/syncState'
 import type {
   Bodyweight,
   Exercise,
@@ -28,6 +29,7 @@ class WorkoutDB extends Dexie {
   runs!: EntityTable<Run, 'id'>
   bodyweights!: EntityTable<Bodyweight, 'date'>
   appSettings!: EntityTable<AppSettings, 'id'>
+  syncState!: EntityTable<SyncState, 'id'>
 
   constructor() {
     super('workout-log')
@@ -46,6 +48,16 @@ class WorkoutDB extends Dexie {
     /** v2 — 어느 영역(운동·가계부)을 쓸지 저장할 곳. 기존 데이터는 건드리지 않는다. */
     this.version(2).stores({
       appSettings: 'id',
+    })
+
+    /**
+     * v3 — 기기 간 동기화 장부 — spec-sync-v0.1.md §4
+     *
+     * 레코드 한 건('default')만 들어가므로 인덱스가 필요 없다.
+     * 기존 스토어를 건드리지 않는 추가라 upgrade 함수가 없다(v2와 같은 패턴).
+     */
+    this.version(3).stores({
+      syncState: 'id',
     })
   }
 }

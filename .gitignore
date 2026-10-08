@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 
 .claude/settings.local.json
+# Firebase 설정값 — docs/spec-sync-v0.1.md §3.5
+.env.local
+
+# iCloud 동기화 제외 — .nosync 접미사를 iCloud가 건너뛴다
+node_modules.nosync

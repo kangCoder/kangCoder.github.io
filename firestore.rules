@@ -1,0 +1,25 @@
+rules_version = '2';
+
+// 기기 간 동기화 보안 규칙 — docs/spec-sync-v0.1.md §3.4
+//
+// 로그인한 사용자가 자기 uid 서브트리만 읽고 쓴다. 그 밖은 읽기도 불가다.
+// Firebase 설정값(apiKey 등)은 공개 번들에 들어가므로 실제 방어선은 이 파일이다.
+//
+// 이름 목록을 조회하는 경로가 없다 — 이름 존재 여부는 로그인 시도의
+// 에러 코드로만 드러난다(§2.5).
+//
+// 콘솔 → Firestore Database → 규칙 탭에 붙여넣고 게시한다.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      // 프로필 아래 snapshots/{area}, tables/*, history/* 전부에 같은 규칙을 적용한다.
+      // 하위 경로를 하나씩 쓰면 나중에 계층을 추가할 때 빠뜨린다.
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+  }
+}

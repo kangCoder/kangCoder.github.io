@@ -12,6 +12,9 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { AppSwitcher } from './components/AppSwitcher'
 import { getAppSettings } from './db/appSettings'
 import { AppSettingsScreen } from './screens/AppSettingsScreen'
+import { ConfigErrorScreen } from './screens/ConfigErrorScreen'
+import { LoginScreen } from './screens/LoginScreen'
+import { useAuthUser } from './sync/useAuthUser'
 import { AssetsScreen } from './finance/screens/AssetsScreen'
 import { BudgetPlanScreen } from './finance/screens/BudgetPlanScreen'
 import { CategoryManageScreen } from './finance/screens/CategoryManageScreen'
@@ -41,11 +44,31 @@ export function App() {
 }
 
 /**
+ * 로그인 게이트 — spec-sync-v0.1.md §7.1
+ *
+ * 본체를 별도 컴포넌트로 분리한 이유: appSettings도 사용자별 데이터라
+ * 로그인 전에 읽어선 안 된다. 훅은 조건부로 부를 수 없으므로 컴포넌트를
+ * 나눠야 Dexie 읽기가 로그인 뒤로 미뤄진다.
+ */
+function AppShell() {
+  const auth = useAuthUser()
+
+  if (auth.state === 'misconfigured') {
+    return <ConfigErrorScreen missing={auth.missing} />
+  }
+  // 세션 복원에 한 틱이 걸린다. 여기서 로그인 화면을 띄우면 매번 깜빡인다
+  if (auth.state === 'loading') return null
+  if (auth.state === 'signedOut') return <LoginScreen />
+
+  return <SignedInShell />
+}
+
+/**
  * 탭바가 영역에 따라 바뀌므로 useLocation을 쓸 수 있도록 Router 안으로 내렸다.
  * 가계부에도 화면이 여러 개라 운동 탭바에 끼워 넣을 수 없다 —
  * spec-finance-v0.2.md §1.5
  */
-function AppShell() {
+function SignedInShell() {
   const { pathname } = useLocation()
   const settings = useLiveQuery(() => getAppSettings(), [])
   const isFinance = pathname.startsWith('/finance')

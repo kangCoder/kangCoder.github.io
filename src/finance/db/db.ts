@@ -13,6 +13,7 @@ import type {
   NetWorthSnapshot,
   Transaction,
 } from './types'
+import type { SyncState } from '../../sync/syncState'
 
 /**
  * 가계부 저장소 — spec-finance-v0.2.md §1.1, §3.1
@@ -37,6 +38,7 @@ class FinanceDB extends Dexie {
   cycleBudgets!: EntityTable<CycleBudget, 'cycleKey'>
   cycleCategoryBudgets!: EntityTable<CycleCategoryBudget, 'id'>
   appliedDeductions!: EntityTable<AppliedDeduction, 'id'>
+  syncState!: EntityTable<SyncState, 'id'>
 
   constructor() {
     super('finance-log')
@@ -102,6 +104,16 @@ class FinanceDB extends Dexie {
     this.version(4).stores({
       cycleCategoryBudgets: 'id, cycleKey, categoryId',
       appliedDeductions: 'id, cycleKey',
+    })
+
+    /**
+     * v5 — 기기 간 동기화 장부 — spec-sync-v0.1.md §4
+     *
+     * 운동 DB의 syncState와 **같은 구조이되 별개 레코드**다. 두 영역의 rev가
+     * 독립이라 한쪽만 바뀌었을 때 다른 쪽을 올리지 않는다(§3.1).
+     */
+    this.version(5).stores({
+      syncState: 'id',
     })
   }
 }
