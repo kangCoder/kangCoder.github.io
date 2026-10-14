@@ -11,7 +11,8 @@
     "check:db": "tsx scripts/check-db.ts",
     "check:auth": "tsx scripts/check-auth.ts",
     "check:snapshot": "tsx scripts/check-snapshot.ts",
-    "check": "npm run check:db && npm run check:auth && npm run check:snapshot",
+    "check:mutations": "tsx scripts/check-mutations.ts",
+    "check": "npm run check:db && npm run check:auth && npm run check:snapshot && npm run check:mutations",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -12,7 +12,11 @@ import {
   restoreBackup,
   type WorkoutBackup,
 } from '../db/backup'
-import { accountName, signOutAccount } from '../sync/auth'
+import { accountName } from '../sync/auth'
+import {
+  pushBeforeSignOut,
+  signOutAndClearDevice,
+} from '../sync/signOutDevice'
 import { SyncSection } from './SyncSection'
 import { useAuthUser } from '../sync/useAuthUser'
 
@@ -114,18 +118,34 @@ export function AppSettingsScreen() {
 }
 
 /**
- * 계정 — docs/spec-sync-v0.1.md §2
+ * 계정 — docs/spec-sync-v0.1.md §2, §7.2
  *
- * 로그아웃이 아직 로컬 DB를 지우지 않는다. 설계(§7.2)는 삭제까지지만
- * 동기화가 구현되기 전에 지우면 올리지 못한 기록이 복구 불가로 사라진다.
- * DB 삭제는 dirty 가드와 같은 단계에서 넣는다.
+ * 로그아웃은 로컬 DB를 지운다. Dexie DB가 오리진당 하나라서, 남기면 다음에
+ * 다른 이름으로 들어온 사람이 남의 기록을 본다.
+ *
+ * 그래서 지우기 전에 올리지 못한 변경을 먼저 올린다. 못 올리면 한 번 더
+ * 묻는다 — 이 지점이 되돌릴 수 없는 유일한 곳이다.
  */
 function AccountSection() {
   const auth = useAuthUser()
-  const [confirming, setConfirming] = useState(false)
+  const [stage, setStage] = useState<'idle' | 'confirm' | 'pushing' | 'unpushed'>(
+    'idle',
+  )
+  const [unpushed, setUnpushed] = useState<string[]>([])
 
   if (auth.state !== 'signedIn') return null
   const name = accountName(auth.user)
+
+  async function begin() {
+    setStage('pushing')
+    const failed = await pushBeforeSignOut()
+    if (failed.length === 0) {
+      await signOutAndClearDevice()
+      return
+    }
+    setUnpushed(failed)
+    setStage('unpushed')
+  }
 
   return (
     <section className="px-4 pt-1 pb-4">
@@ -137,41 +157,61 @@ function AccountSection() {
             이 이름으로 기록이 구분됩니다
           </p>
         </div>
-        <Button onClick={() => setConfirming(true)}>로그아웃</Button>
+        <Button
+          disabled={stage === 'pushing'}
+          onClick={() => setStage('confirm')}
+        >
+          {stage === 'pushing' ? '올리는 중…' : '로그아웃'}
+        </Button>
       </div>
 
-      {confirming && (
+      {stage === 'confirm' && (
         <ConfirmDialog
           title="로그아웃할까요?"
           description={
             <>
               <p>
-                다시 들어오려면 이름과 PIN이 필요합니다. PIN을 잊으면 복구할
-                수 없습니다.
+                올리지 못한 변경을 먼저 올린 뒤, <b>이 기기의 기록을 지웁니다.</b>{' '}
+                다른 사람이 이 기기에서 다른 이름으로 들어올 수 있게 하려면
+                지워야 합니다.
               </p>
               <p className="mt-1">
-                이 기기의 기록은 지워지지 않고 남습니다. 아직 기기 간 동기화가
-                켜지지 않았으니, 다른 이름으로 들어오면 이 기록이 그대로
-                보입니다.
+                기록은 원격에 남아 있으니 같은 이름과 PIN으로 다시 들어오면
+                돌아옵니다. PIN을 잊으면 복구할 수 없습니다.
               </p>
             </>
           }
           confirmLabel="로그아웃"
-          onConfirm={() => void signOutAccount()}
-          onCancel={() => setConfirming(false)}
+          onConfirm={() => void begin()}
+          onCancel={() => setStage('idle')}
+        />
+      )}
+
+      {stage === 'unpushed' && (
+        <ConfirmDialog
+          title="올리지 못한 변경이 있습니다"
+          description={
+            <>
+              <p>
+                <b>{unpushed.join(' · ')}</b>을 원격에 올리지 못했습니다.
+                연결이 끊겼거나 다른 기기가 먼저 올렸을 수 있습니다.
+              </p>
+              <p className="mt-1">
+                그래도 로그아웃하면 이 기기의 해당 기록은{' '}
+                <b>복구할 수 없습니다.</b> 취소하고 연결을 확인하거나, 백업을
+                내려둔 뒤 진행하세요.
+              </p>
+            </>
+          }
+          confirmLabel="지우고 로그아웃"
+          onConfirm={() => void signOutAndClearDevice()}
+          onCancel={() => setStage('idle')}
         />
       )}
     </section>
   )
 }
 
-/**
- * 운동 기록 백업 — spec-sync-v0.1.md §10
- *
- * 가계부 설정의 BackupSection과 같은 구조다. 양쪽을 한 화면에 합치지 않는
- * 이유는 DB가 분리돼 있어 파일도 따로여야 하고, 한쪽만 복원하는 경우가
- * 실제로 있기 때문이다.
- */
 function BackupSection() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState<WorkoutBackup>()

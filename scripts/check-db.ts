@@ -13,6 +13,7 @@
  *   6. patchSyncState가 필드를 부분 갱신한다
  *   7. format 가드
  *   8. 기존 기록이 있는 기기는 dirty=true로 시작한다  ← §7.3, 유실 방지의 핵심
+ *   9. TABLE_NAMES가 실제 DB 테이블과 일치한다        ← 누락은 조용한 유실
  */
 import 'fake-indexeddb/auto'
 
@@ -157,6 +158,43 @@ async function main(): Promise<void> {
   await financeDb.syncState.clear()
   const withTx = await ensureSyncState(financeDb, FINANCE_USER_DATA_TABLES)
   check('거래 1건 → dirty=true', withTx.dirty, true)
+
+  console.log('\n[9] 테이블 목록이 실제 DB와 일치하는가')
+  // 새 Dexie 테이블을 추가하고 TABLE_NAMES에 넣지 않으면 그 테이블은
+  // 스냅샷에 담기지 않는다. 변경은 훅에 잡혀 dirty가 서고 push도 성공하지만
+  // 데이터는 올라가지 않는다 — 오류 없이 사라지므로 가장 찾기 어려운 종류다.
+  const skipped = ['syncState']
+  for (const [label, dexie, names] of [
+    ['workout', db, workoutBackup.WORKOUT_TABLE_NAMES],
+    ['finance', financeDb, financeBackup.FINANCE_TABLE_NAMES],
+  ] as const) {
+    const actual = dexie.tables
+      .map((table) => table.name)
+      .filter((name) => !skipped.includes(name))
+      .sort()
+    check(`${label} TABLE_NAMES 일치`, [...names].sort(), actual)
+  }
+
+  // userDataTables는 TABLE_NAMES의 부분집합이어야 한다 — 오타가 있으면
+  // ensureSyncState가 없는 테이블을 세려다 터진다
+  // 두 영역의 튜플 타입을 한 배열에 섞으면 includes의 인자가 never로
+  // 좁혀진다. 문자열로 넓혀서 비교한다.
+  const listPairs: Array<[string, readonly string[], readonly string[]]> = [
+    [
+      'workout',
+      workoutBackup.WORKOUT_TABLE_NAMES,
+      workoutBackup.WORKOUT_USER_DATA_TABLES,
+    ],
+    [
+      'finance',
+      financeBackup.FINANCE_TABLE_NAMES,
+      financeBackup.FINANCE_USER_DATA_TABLES,
+    ],
+  ]
+  for (const [label, names, userNames] of listPairs) {
+    const stray = userNames.filter((name) => !names.includes(name))
+    check(`${label} userDataTables ⊆ TABLE_NAMES`, stray, [])
+  }
 
   console.log(
     failures === 0

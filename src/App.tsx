@@ -13,8 +13,11 @@ import { AppSwitcher } from './components/AppSwitcher'
 import { getAppSettings } from './db/appSettings'
 import { AppSettingsScreen } from './screens/AppSettingsScreen'
 import { ConfigErrorScreen } from './screens/ConfigErrorScreen'
+import { FirstSyncGate } from './screens/FirstSyncGate'
 import { LoginScreen } from './screens/LoginScreen'
+import { SyncConflictSheet } from './screens/SyncConflictSheet'
 import { useAuthUser } from './sync/useAuthUser'
+import { useStartAutoSync } from './sync/useSyncStatus'
 import { AssetsScreen } from './finance/screens/AssetsScreen'
 import { BudgetPlanScreen } from './finance/screens/BudgetPlanScreen'
 import { CategoryManageScreen } from './finance/screens/CategoryManageScreen'
@@ -60,7 +63,33 @@ function AppShell() {
   if (auth.state === 'loading') return null
   if (auth.state === 'signedOut') return <LoginScreen />
 
-  return <SignedInShell />
+  // key에 uid를 둔다 — 계정이 바뀌면 게이트와 동기화 배선을 처음부터
+  // 다시 세워야 한다. 그러지 않으면 이전 사용자의 판단이 남는다.
+  return <SignedInApp key={auth.user.uid} />
+}
+
+/**
+ * 로그인 이후 — docs/spec-sync-v0.1.md §7
+ *
+ * 순서가 중요하다. FirstSyncGate가 통과하기 전에는 SignedInShell을 그리지
+ * 않는다. 그려 버리면 가계부 진입 시 시드가 pull보다 먼저 들어간다(§7).
+ */
+function SignedInApp() {
+  return (
+    <FirstSyncGate>
+      <AutoSyncHost />
+    </FirstSyncGate>
+  )
+}
+
+function AutoSyncHost() {
+  useStartAutoSync()
+  return (
+    <>
+      <SignedInShell />
+      <SyncConflictSheet />
+    </>
+  )
 }
 
 /**

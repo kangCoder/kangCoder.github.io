@@ -327,6 +327,31 @@ for (const table of db.tables) {
 
 PIN 재설정이 불가능한 설계라서, 유실이 복구 가능하다는 보장이 특히 중요하다.
 
+### 5.2-a `dirty`를 안전 가드로 쓰지 않는다
+
+3단계에서 `push`를 "`dirty`가 false면 올리지 않는다"로 만들었다. **틀렸다.**
+실제로 PC에서 입력한 뒤 올리기를 눌렀는데 "올릴 변경이 없습니다"만 나왔다.
+
+원인은 `dirty`를 세우는 변경 훅이 4단계에 있다는 것이다. 3단계 배포본에는
+그 코드가 없어서, 첫 pull 이후 `dirty`가 영원히 false였고 수동 버튼이
+죽어 있었다. **구현하지 않은 기능에 의존하는 가드를 배포한 것이다.**
+
+4단계를 올려도 그 기기의 **기존** 입력은 구제되지 않는다. `ensureSyncState`가
+이미 `dirty=false`로 장부를 만들어 뒀고 훅은 앞으로의 쓰기만 잡는다.
+
+그래서 가드를 바꿨다. 막으려던 위험은 "이 기기에 기록이 없는데 원격에는
+있는 상태에서 올려 원격을 비우는 것"이고, 그것을 **직접** 검사한다
+(`isLocalEmpty` — §7.3과 같은 기준, 시드 테이블 제외).
+
+| 상황 | 자동 push | 수동 push (`force`) |
+|---|---|---|
+| 로컬 비어 있고 원격 있음 | `refused` | `refused` — 올려서 얻을 것이 없다 |
+| `dirty=false`, 로컬 있음 | `clean` | **올린다** |
+| `dirty=true` | 올린다 | 올린다 |
+
+교훈 — 대리 지표를 안전 가드로 쓰면 그 지표가 틀린 모든 경우가
+"눌렀는데 아무 일도 안 일어난다"로 나타난다. 위험 자체를 검사해야 한다.
+
 ### 5.4-a 실측 (3단계 구현 후)
 
 `npm run check:snapshot`이 측정한 값이다.
@@ -476,6 +501,23 @@ PC: 빈 DB로 처음 로그인 → 시드만 담긴 rev=1 을 push
    자동 pull이 돌지 않고, 첫 push에서 폰의 기록이 rev=1이 된다
 4. PC는 빈 상태로 로그인해 그 rev=1을 받는다
 
+### 7.5 게이트 통과 조건 (6단계 구현 후)
+
+§7의 흐름을 영역별로 판단한다. 운동만 쓰다가 가계부를 처음 켜는 경우가
+있어서, 한쪽이 준비됐다고 다른 쪽도 준비된 것으로 볼 수 없다.
+
+들여보내는 조건은 영역별 OR다:
+
+- `everPulled` — 원격 상태를 한 번 확인했다 (`empty`도 확인 성공이다)
+- `dirty` — 이 기기에 올릴 기록이 있다. 시드가 덮을 것이 없다
+
+**`dirty`를 통과 조건에 넣는 이유.** 기존 기록이 있는 폰은 §7.3에 따라
+`dirty=true`이고, 그 상태에서 `pull`은 `blocked:dirty`로 멈춘다(§5.3).
+`everPulled`만 요구하면 그 폰은 영원히 게이트를 통과하지 못한다.
+
+둘 다 아니면(빈 로컬 + 원격 확인 실패) 들여보내지 않는다. 그대로 들어가면
+시드가 들어가고, 온라인 복귀 시 원격의 실제 데이터와 충돌한다.
+
 ---
 
 ## 8. 스키마 버전 가드
@@ -524,7 +566,13 @@ push 30회 × 문서 25개 = 750 쓰기. 한 자릿수 퍼센트다.
 | `src/sync/auth.ts` | 이름 정규화, 합성 이메일·비밀번호, 로그인/등록/로그아웃 |
 | `src/sync/useAuthUser.ts` | 로그인 상태 훅 — misconfigured/loading/signedOut/signedIn |
 | `src/sync/snapshot.ts` | 테이블 하나의 gzip 인코딩·디코딩, 비압축 폴백 |
-| `src/sync/engine.ts` | pull / push(CAS) / 전체 교체 |
+| `src/sync/engine.ts` | pull / push(CAS) / 전체 교체 / 이력 / 충돌 해결 |
+| `src/sync/mutations.ts` | Dexie 훅 등록과 억제. 아무것도 import하지 않는다 — engine·auto가 이쪽을 쓰는 단방향이어야 순환이 없다 |
+| `src/sync/auto.ts` | 디바운스·이벤트 배선·상태 저장소. 수동 버튼도 이 직렬화 경로를 지난다 |
+| `src/sync/useSyncStatus.ts` | `useSyncExternalStore` 구독, 자동 동기화 시작 |
+| `src/sync/signOutDevice.ts` | §7.2 로그아웃 — 올린 뒤 로컬 DB 삭제 |
+| `src/screens/FirstSyncGate.tsx` | §7 최초 동기화 게이트 |
+| `scripts/check-mutations.ts` | 변경 감지·억제 하네스 (`npm run check:mutations`) |
 | `src/screens/SyncSection.tsx` | 수동 동기화 UI (3단계). 4단계에서 자동이 붙어도 남는다 |
 | `scripts/check-snapshot.ts` | 인코딩 하네스 (`npm run check:snapshot`) |
 | `src/sync/syncState.ts` | §4 스토어 접근 + §7.3 `ensureSyncState` (area 양쪽 공용) |
@@ -574,9 +622,9 @@ CLAUDE.md의 "한 번에 한 화면씩"에 맞춰 나눈다.
    `push`는 `dirty`가 false면 올리지 않는다 — 막 로그인한 빈 기기에서 눌러
    원격의 실제 기록을 빈 스냅샷으로 덮는 사고를 막는다(원격이 비어 있을
    때만 예외).
-4. 훅 기반 dirty + 디바운스 자동 동기화
-5. 충돌 모달(§6) + 이력(§5.4)
-6. 부트스트랩 순서 변경(§7), 로그아웃(§7.2)
+4. 훅 기반 dirty + 디바운스 자동 동기화 — **완료**
+5. 충돌 모달(§6) + 이력(§5.4) — **완료**
+6. 부트스트랩 순서 변경(§7), 로그아웃(§7.2) — **완료**
 
 1·2·3·4는 Node 하네스로 검증한다 — DB는 `fake-indexeddb`, 자격 증명 합성은
 순수 함수다(`npm run check`).
@@ -586,7 +634,7 @@ CLAUDE.md의 "한 번에 한 화면씩"에 맞춰 나눈다.
 | 명령 | 범위 |
 |---|---|
 | `npm run typecheck` | `tsc -b`(app·node) + scripts 프로젝트 |
-| `npm run check` | Node 하네스 — DB·백업·장부, 자격 증명 |
+| `npm run check` | Node 하네스 — DB·백업·장부, 자격 증명, 스냅샷 인코딩, 변경 감지 |
 | `npm run lint` | ESLint |
 | `npm run build` | 배포와 같은 경로 |
 
