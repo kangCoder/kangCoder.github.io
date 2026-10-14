@@ -113,6 +113,14 @@ export function AppSettingsScreen() {
 
       <SyncSection />
       <BackupSection />
+
+      {/*
+        캐시된 구버전을 실행 중인지 확인할 곳 — docs/spec-sync-v0.1.md §8.1
+        "코드가 틀렸나 캐시가 낡았나"를 가릴 수 없으면 버그를 못 잡는다.
+      */}
+      <p className="px-4 pb-6 text-center text-[11px] text-zinc-400 tabular-nums">
+        빌드 {__BUILD_ID__}
+      </p>
     </div>
   )
 }

@@ -97,11 +97,21 @@ export async function readRemoteHead(
 }
 
 /**
- * 사용자 기록이 한 건도 없는가 — §7.3의 판단과 같은 기준을 쓴다.
- * 시드 테이블은 제외되므로, 갓 시드된 가계부도 "비어 있음"이다.
+ * 스냅샷 테이블 **전부**가 비었는가 — §5.2-a
+ *
+ * 처음에는 §7.3의 `userDataTables`(시드 테이블 제외)를 썼다. 그러면
+ * 카테고리만 손보고 거래를 아직 넣지 않은 기기가 "비어 있음"으로 잡혀
+ * 올리기가 거부된다 — 실제 작업을 했는데 아무 일도 안 일어난다.
+ *
+ * `userDataTables`를 좁게 둔 목적은 §7.3의 dirty 판정이었다. 거기서는
+ * "갓 시드된 새 기기를 충돌로 몰지 않기"가 맞다. 여기서는 목적이 다르다 —
+ * **원격을 빈 스냅샷으로 비우는 것**만 막으면 된다.
+ *
+ * 시드만 있는 기기가 원격의 실제 데이터를 덮는 위험은 FirstSyncGate(§7)가
+ * 이미 막는다. 시드보다 pull이 먼저이므로 그 상태에 도달하지 않는다.
  */
 async function isLocalEmpty(area: SyncArea): Promise<boolean> {
-  for (const name of area.userDataTables) {
+  for (const name of area.tableNames) {
     if ((await area.db.table(name).count()) > 0) return false
   }
   return true

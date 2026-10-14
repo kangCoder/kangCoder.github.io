@@ -18,3 +18,9 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+/**
+ * 빌드 식별자 — vite.config.ts가 주입한다.
+ * 캐시된 구버전을 실행 중인지 앱 안에서 확인할 수 있게 한다.
+ */
+declare const __BUILD_ID__: string
