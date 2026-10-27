@@ -319,6 +319,20 @@ function CategorySheet({
 
           <AmountField label="월 예산" value={budget} onChange={setBudget} />
 
+          {/*
+            급여에서 바로 빠지는 원금은 카테고리로 만들지 않는다 — §2.3.1
+            거래를 만들면 저축률이 이중 계산된다. 찾지 못해 헤매는 지점이라
+            어디로 가야 하는지 적어 둔다.
+          */}
+          {type === 'TRANSFER' && (
+            <p className="rounded-xl bg-amber-50 p-3 text-[12px] leading-relaxed text-amber-800 ring-1 ring-amber-200">
+              회사대출 원금처럼 <b>급여에서 이미 공제되어 들어오는</b> 상환은
+              카테고리로 만들지 마세요. 거래로 잡으면 저축률이 두 번 계산됩니다.
+              가계부 설정 → 소득에서 공제 항목을 추가하고 <b>원금</b> 배지를 켠
+              뒤, 그 아래에서 부채를 연결하면 잔액이 자동으로 줄어듭니다.
+            </p>
+          )}
+
           {/* 자산·부채 연결 — §5.7. 저축·이체 유형에서만 의미가 있다 */}
           {(type === 'SAVING' || type === 'TRANSFER') && (
             <div>
@@ -352,9 +366,9 @@ function CategorySheet({
               </select>
               <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
                 연결하면 이 카테고리의 거래가 그 자산·부채 잔액에 바로 반영됩니다.
-                기준일 이후의 거래만 더하므로 과거 기록이 소급되지 않습니다.
-                투자처럼 시세가 변하는 자산은 잔액을 직접 갱신하면 그 시점이
-                새 기준일이 됩니다.
+                자산의 <b>기준일부터</b>의 거래만 더하므로 과거 기록이
+                소급되지 않습니다. 투자처럼 시세가 변하는 자산은 잔액을 직접
+                갱신하면 그 시점이 새 기준일이 됩니다.
               </p>
             </div>
           )}

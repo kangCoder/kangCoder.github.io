@@ -44,9 +44,10 @@ export function TransactionFormScreen() {
    *
    * 주간 목록만 있으면 "지난달 15일에 뭐 썼지"를 찾으려면 주를 여러 번
    * 넘겨야 한다. 캘린더는 한 달을 한눈에 보여 주고, 점의 크기로 그날
-   * 입력이 있었는지가 즉시 읽힌다.
+   * 입력이 있었는지가 즉시 읽힌다. **기본이 캘린더다** — 입력 직후 확인도
+   * 오늘 날짜를 누르면 되고, 지난 날 찾기가 압도적으로 편하다.
    */
-  const [view, setView] = useState<'week' | 'calendar'>('week')
+  const [view, setView] = useState<'week' | 'calendar'>('calendar')
   const [month, setMonth] = useState(() => new Date())
   const [pickedDay, setPickedDay] = useState<string>()
   const [week, setWeek] = useState<WeekInfo>(() => currentWeek())
@@ -310,6 +311,11 @@ export function TransactionFormScreen() {
                 setPickedDay(undefined)
               }}
               marks={dayMarks}
+              selected={
+                pickedDay ? new Date(`${pickedDay}T00:00:00`) : undefined
+              }
+              // 빈 날을 눌러 "입력이 없습니다"를 확인하는 것이 자연스럽다
+              selectAnyDay
               onSelectDay={(date) => {
                 const key = formatDate(date, 'yyyy-MM-dd')
                 // 같은 날을 다시 누르면 해제해 그 달 전체로 돌아간다

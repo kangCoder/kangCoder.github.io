@@ -15,13 +15,20 @@ import type { Asset, Debt } from './types'
  *
  * ### 기준일(reflectFrom)
  *
- * `balance`는 `reflectFrom` 날짜 기준의 값이고, **그 날짜보다 뒤의** 거래만
- * 더한다. 잔액을 직접 입력하면 기준일이 그날로 갱신되므로 이미 반영된
- * 금액을 두 번 세지 않는다. 투자처럼 시세로 직접 갱신하는 자산은 입력할
- * 때마다 기준이 리셋되고, 예적금은 거래가 쌓이는 대로 저절로 올라간다.
+ * `balance`는 **`reflectFrom` 날짜 0시 기준**의 값이고, 그 날짜부터의 거래를
+ * 더한다(이상 비교). 잔액을 직접 입력하면 기준일이 그날로 갱신되므로 이미
+ * 반영된 금액을 두 번 세지 않는다. 투자처럼 시세로 직접 갱신하는 자산은
+ * 입력할 때마다 기준이 리셋되고, 예적금은 거래가 쌓이는 대로 저절로 올라간다.
  *
- * 같은 날짜의 거래는 더하지 않는다(초과 비교). 잔액을 맞춘 그 날의 거래는
- * 이미 그 숫자에 들어 있다고 보는 것이 자연스럽다.
+ * **처음엔 초과 비교(`>`)였다. 틀렸다.** 마이그레이션이 기준일을 오늘로
+ * 박으므로, 카테고리를 연결하고 그날 거래를 넣으면 아무것도 반영되지 않았다.
+ * 기능이 고장 난 것처럼 보이고, 도입 첫날 모든 사용자가 겪는다.
+ *
+ * 이상 비교의 대가는 좁다 — 은행 앱에서 본 잔액(오늘 거래가 이미 포함된
+ * 금액)을 그대로 적으면 그날 거래가 두 번 센다. 그때는 기준일을 다음 날로
+ * 두거나 오늘 거래 전 금액을 적으면 된다. 폼에 반영액이 보이므로 확인할 수 있다.
+ *
+ * 흔한 경우가 조용히 안 되는 것보다 드문 경우를 설명으로 다루는 쪽이 낫다.
  *
  * ### 연결 경로 두 가지
  *
@@ -102,10 +109,11 @@ export async function loadBalances(): Promise<Balances> {
       debts: debts.map((debt) => ({ ...debt, reflected: 0 })),
     }
   }
+  // aboveOrEqual — above()는 초과라 가장 이른 기준일 당일 거래가 빠진다
   const earliest = known.sort()[0]
   const transactions = await financeDb.transactions
     .where('date')
-    .above(earliest)
+    .aboveOrEqual(earliest)
     .toArray()
 
   const assetReflected = new Map<string, number>()
@@ -118,7 +126,7 @@ export async function loadBalances(): Promise<Balances> {
     if (assetId !== undefined) {
       const from = assetFrom.get(assetId)
       // 기준일이 없으면 반영하지 않는다 (위 주석 참조)
-      if (from !== undefined && tx.date > from) {
+      if (from !== undefined && tx.date >= from) {
         assetReflected.set(assetId, (assetReflected.get(assetId) ?? 0) + tx.amount)
       }
     }
@@ -128,7 +136,7 @@ export async function loadBalances(): Promise<Balances> {
       debtByCategory.get(tx.categoryId)
     if (debtId !== undefined) {
       const from = debtFrom.get(debtId)
-      if (from !== undefined && tx.date > from) {
+      if (from !== undefined && tx.date >= from) {
         debtReflected.set(debtId, (debtReflected.get(debtId) ?? 0) + tx.amount)
       }
     }

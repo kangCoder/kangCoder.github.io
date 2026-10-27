@@ -390,13 +390,13 @@ function AssetSheet({
           <AmountField label="잔액" value={balance} onChange={setBalance} />
           {asset && asset.reflected !== 0 && (
             <p className="rounded-xl bg-zinc-50 p-3 text-[12px] leading-relaxed text-zinc-500 ring-1 ring-zinc-200">
-              위 잔액에는 기준일 이후 거래{' '}
+              위 잔액에는 기준일부터의 거래{' '}
               <b className="tabular-nums">{formatWon(asset.reflected)}원</b>이
               이미 더해져 있습니다. 그대로 저장하면 오늘이 새 기준일이 됩니다.
             </p>
           )}
           <div>
-            <Label hint="이 금액이 어느 날 기준인가. 이 날짜 이후의 연결된 거래가 더해진다">
+            <Label hint="이 날 0시 기준 금액. 이 날짜부터의 연결된 거래가 더해진다">
               기준일
             </Label>
             <input
@@ -528,7 +528,7 @@ function DebtSheet({
           <AmountField label="잔액" value={balance} onChange={setBalance} />
           {debt && debt.reflected !== 0 && (
             <p className="rounded-xl bg-zinc-50 p-3 text-[12px] leading-relaxed text-zinc-500 ring-1 ring-zinc-200">
-              위 잔액은 기준일 이후 상환 거래{' '}
+              위 잔액은 기준일부터의 상환 거래{' '}
               <b className="tabular-nums">{formatWon(debt.reflected)}원</b>이
               이미 빠진 금액입니다. 그대로 저장하면 오늘이 새 기준일이 됩니다.
             </p>

@@ -8,7 +8,7 @@
  *
  * 확인하는 불변식:
  *   1. 연결이 없으면 잔액이 그대로다
- *   2. 기준일 이후 거래만 더한다 (같은 날짜는 더하지 않는다)
+ *   2. 기준일부터의 거래를 더한다 (당일 포함 — 도입 첫날의 실제 경로)
  *   3. 거래를 지우면 잔액이 자동으로 돌아간다
  *   4. 잔액을 다시 입력하면 기준일이 리셋되어 이중 계산이 없다
  *   5. 부채는 줄고 0 아래로 내려가지 않는다
@@ -97,19 +97,36 @@ async function main(): Promise<void> {
   check('잔액 변화 없음', balances.assets[0].balance, 1_000_000)
   check('반영액 0', balances.assets[0].reflected, 0)
 
-  console.log('\n[2] 기준일 이후 거래만 더한다')
+  console.log('\n[2] 기준일부터의 거래를 더한다 (이상 비교)')
   await reset()
   await addAsset({ reflectFrom: '2026-10-10' })
   await addCategory({ assetId: 'a1' })
   await addTx('before', '2026-10-05', 100_000) // 기준일 이전 — 제외
-  await addTx('sameday', '2026-10-10', 200_000) // 기준일과 같은 날 — 제외
+  await addTx('sameday', '2026-10-10', 200_000) // 기준일 당일 — 포함
   await addTx('after', '2026-10-15', 300_000) // 이후 — 포함
   balances = await loadBalances()
-  check('이후 거래만 반영', balances.assets[0].reflected, 300_000)
-  check('잔액 = 원금 + 반영', balances.assets[0].balance, 1_300_000)
+  check('기준일 이전은 제외', balances.assets[0].reflected, 500_000)
+  check('잔액 = 원금 + 반영', balances.assets[0].balance, 1_500_000)
+
+  /**
+   * 도입 첫날의 실제 경로 — 이게 깨지면 "연결했는데 아무 일도 안 일어난다"가 된다.
+   *
+   * 마이그레이션이 기준일을 오늘로 박으므로, 카테고리를 연결하고 그날 거래를
+   * 넣는 것이 가장 흔한 첫 경험이다. 초과 비교였을 때 이 경우가 조용히
+   * 반영되지 않았다.
+   */
+  console.log('\n[2-a] 기준일 당일에 넣은 거래가 반영되는가')
+  await reset()
+  const todayKey = new Date().toISOString().slice(0, 10)
+  await addAsset({ reflectFrom: todayKey })
+  await addCategory({ assetId: 'a1' })
+  await addTx('t-today', todayKey, 400_000)
+  balances = await loadBalances()
+  check('연결 당일 거래 반영', balances.assets[0].reflected, 400_000)
+  check('잔액 증가', balances.assets[0].balance, 1_400_000)
 
   console.log('\n[3] 거래를 지우면 자동으로 돌아간다')
-  await financeDb.transactions.delete('after')
+  await financeDb.transactions.delete('t-today')
   balances = await loadBalances()
   check('삭제 후 반영액 0', balances.assets[0].reflected, 0)
   check('삭제 후 잔액 복귀', balances.assets[0].balance, 1_000_000)
@@ -139,6 +156,37 @@ async function main(): Promise<void> {
   balances = await loadBalances()
   check('재입력 후 이중 계산 없음', balances.assets[0].balance, 1_500_000)
   check('재입력 후 반영액 0', balances.assets[0].reflected, 0)
+
+  /**
+   * 이상 비교의 알려진 대가 — 사고가 아니라 선택이다.
+   *
+   * 은행 앱에서 본 잔액(오늘 거래가 이미 포함된 금액)을 그대로 적으면
+   * 그날 거래가 두 번 센다. 이 경우를 막으려 초과 비교를 썼다가 "연결했는데
+   * 아무 일도 안 일어난다"는 더 흔하고 더 나쁜 증상을 만들었다.
+   *
+   * 테스트로 남겨 두는 이유 — 누군가 "이중 계산이네" 하고 초과 비교로
+   * 되돌리는 것을 막기 위해서다. 그 선택의 결과가 무엇인지 여기 적혀 있다.
+   */
+  console.log('\n[4-a] 알려진 대가: 기준일 당일 거래는 재입력 시 두 번 센다')
+  await reset()
+  const t2 = new Date().toISOString().slice(0, 10)
+  await addAsset({ balance: 1_000_000, reflectFrom: t2 })
+  await addCategory({ assetId: 'a1' })
+  await addTx('same', t2, 300_000)
+  balances = await loadBalances()
+  check('반영 후 1,300,000', balances.assets[0].balance, 1_300_000)
+  // 화면이 보여 준 1,300,000을 그대로 저장한다 (기준일도 오늘)
+  await saveAsset(
+    { name: '적금', kind: 'SAVINGS', balance: 1_300_000, isLiquidByTarget: true },
+    'a1',
+  )
+  balances = await loadBalances()
+  check(
+    '당일 거래가 다시 더해진다 (문서화된 동작)',
+    balances.assets[0].balance,
+    1_600_000,
+  )
+  check('반영액이 보이므로 확인 가능', balances.assets[0].reflected, 300_000)
 
   console.log('\n[5] 부채는 줄고 0 아래로 안 내려간다')
   await reset()
