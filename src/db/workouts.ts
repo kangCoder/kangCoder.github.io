@@ -333,13 +333,17 @@ export async function removeWorkoutExercise(id: string): Promise<void> {
  * 세션 종료. endedAt이 찍히는 순간 기록이 확정된다.
  * 미완료 세트는 지우지 않는다 — 체크를 깜빡한 경우를 복구할 수 없게 되고,
  * 집계는 isCompleted로 거르면 충분하다(§7).
+ *
+ * `endedAt`을 받는 이유 — 종료를 깜빡한 세션을 마지막 세트 시각으로
+ * 닫을 때 쓴다(§6.3). 지금 시각으로 닫으면 하룻밤이 운동 시간으로 잡힌다.
  */
 export async function finishWorkout(
   id: string,
   condition: ConditionInput,
+  endedAt: number = Date.now(),
 ): Promise<void> {
   await db.workouts.update(id, {
-    endedAt: Date.now(),
+    endedAt,
     sleepHours: condition.sleepHours,
     backCondition: condition.backCondition,
     kneeCondition: condition.kneeCondition,

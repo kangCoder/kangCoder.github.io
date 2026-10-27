@@ -23,11 +23,17 @@ const SCALE_HINT = '1 나쁨 · 5 좋음'
 export function WorkoutFinishSheet({
   workoutId,
   incompleteSets,
+  endedAt,
   onClose,
   onFinished,
 }: {
   workoutId: string
   incompleteSets: number
+  /**
+   * 종료 시각을 지정한다. 종료를 깜빡한 세션을 마지막 세트 시각으로
+   * 닫을 때만 쓴다(§6.3). 생략하면 지금 시각이다.
+   */
+  endedAt?: number
   onClose: () => void
   onFinished: () => void
 }) {
@@ -47,12 +53,11 @@ export function WorkoutFinishSheet({
     )
     await applyTemplateDiff(selected)
 
-    await finishWorkout(workoutId, {
-      sleepHours,
-      backCondition,
-      kneeCondition,
-      note,
-    })
+    await finishWorkout(
+      workoutId,
+      { sleepHours, backCondition, kneeCondition, note },
+      endedAt,
+    )
     onFinished()
   }
 

@@ -1,20 +1,19 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, IconButton } from '../components/Button'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { EmptyState } from '../components/EmptyState'
 import { ExerciseTypeBadge } from '../components/ExerciseTypeBadge'
 import { NumberField } from '../components/fields'
-import { RestTimerBar } from '../components/RestTimerBar'
 import {
   SET_TYPE_CLASS,
   SET_TYPE_MARK,
   nextSetType,
 } from '../components/setTypeMeta'
-import { playAlarm, unlockAlarm } from '../lib/alarm'
+import { unlockAlarm } from '../lib/alarm'
 import { formatDuration } from '../lib/duration'
-import { useCountdown } from '../lib/useCountdown'
+import { useRestTimer } from '../lib/restTimerContext'
 import { useElapsed } from '../lib/useElapsed'
 import { useWakeLock } from '../lib/useWakeLock'
 import type { Exercise, WorkoutSet } from '../db/types'
@@ -36,12 +35,15 @@ import { WorkoutDetailScreen } from './WorkoutDetailScreen'
 import { WorkoutFinishSheet } from './WorkoutFinishSheet'
 
 /** 진행 중인 휴식. 화면에만 사는 값이라 DB에 남기지 않는다. */
-interface RestState {
-  /** 이 타이머를 식별하고, 첫 프레임의 기준 시각이 된다 */
-  startedAt: number
-  endsAt: number
-  label: string
-}
+/**
+ * 마지막 세트 후 이만큼 지나면 종료를 묻는다 — §6.3
+ *
+ * 종료를 깜빡하면 하룻밤이 운동 시간으로 기록된다. 그런데 **앱이 닫힌 뒤에
+ * 울리는 알림은 만들 수 없다** — 웹 푸시는 서버가 필요하고(백엔드 없음 원칙),
+ * 예약 알림 API는 iOS에 없다. 그래서 앱이 열려 있는 동안, 그리고 다시 열었을
+ * 때 묻는다. 후자가 "깜빡한 세션"의 실제 해결책이다.
+ */
+const IDLE_LIMIT_MS = 10 * 60 * 1000
 
 /**
  * 세션 진행 화면 — §5.1
@@ -53,7 +55,10 @@ export function WorkoutScreen() {
   const [picking, setPicking] = useState(false)
   const [finishing, setFinishing] = useState(false)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
-  const [rest, setRest] = useState<RestState>()
+  /** "계속하기"를 누른 시각. 여기서부터 다시 10분을 센다 */
+  const [idleSnoozedAt, setIdleSnoozedAt] = useState(0)
+  /** 자동 종료로 들어간 경우의 종료 시각 */
+  const [finishAt, setFinishAt] = useState<number>()
 
   const workout = useLiveQuery(
     () => (id ? getWorkout(id) : undefined),
@@ -70,8 +75,9 @@ export function WorkoutScreen() {
   // 화면이 꺼지면 JS 타이머가 멈춘다 — 세션 동안 켜 둔다(§6.2)
   useWakeLock(isRunning)
 
-  const onRestFinish = useCallback(() => playAlarm(), [])
-  const restRemaining = useCountdown(rest?.startedAt, rest?.endsAt, onRestFinish)
+  // 휴식 상태는 라우터 위의 프로바이더가 들고 있다 — 화면을 떠나도
+  // 타이머가 살아 있어야 알람이 울린다(§6.2)
+  const { start: startRest } = useRestTimer()
 
   if (!id) return null
 
@@ -97,6 +103,32 @@ export function WorkoutScreen() {
   const totalSets =
     items?.reduce((sum, item) => sum + item.sets.length, 0) ?? 0
 
+  // 마지막으로 완료 체크한 세트의 시각 — §6.3
+  const lastCompletedAt =
+    items?.reduce(
+      (latest, item) =>
+        item.sets.reduce(
+          (inner, set) => Math.max(inner, set.completedAt ?? 0),
+          latest,
+        ),
+      0,
+    ) ?? 0
+
+  /**
+   * 렌더 중에 Date.now()를 부르지 않는다. elapsed가 250ms마다 갱신되므로
+   * startedAt + elapsed 가 지금 시각이고, 이렇게 두면 순수하게 유지되면서
+   * 포그라운드에 있는 동안 저절로 다시 평가된다.
+   */
+  const approxNow = (workout?.startedAt ?? 0) + elapsed
+  const idleSince = Math.max(lastCompletedAt, idleSnoozedAt)
+  // 세트를 한 번도 체크하지 않은 세션은 묻지 않는다 — 준비 중일 수 있다
+  const askAutoFinish =
+    isRunning &&
+    lastCompletedAt > 0 &&
+    finishAt === undefined &&
+    !finishing &&
+    approxNow - idleSince >= IDLE_LIMIT_MS
+
   async function discard() {
     await discardWorkout(id!)
     navigate('/', { replace: true })
@@ -112,12 +144,7 @@ export function WorkoutScreen() {
     await setWorkoutSetCompleted(set.id, next)
 
     if (!next || !item.restSeconds || item.restSeconds <= 0) return
-    const startedAt = Date.now()
-    setRest({
-      startedAt,
-      endsAt: startedAt + item.restSeconds * 1000,
-      label: item.exerciseName,
-    })
+    startRest(item.exerciseName, item.restSeconds)
   }
 
   return (
@@ -182,22 +209,6 @@ export function WorkoutScreen() {
         <Button onClick={() => setPicking(true)}>+ 종목 추가</Button>
       </div>
 
-      {rest && (
-        <RestTimerBar
-          label={rest.label}
-          remainingMs={restRemaining}
-          totalMs={rest.endsAt - rest.startedAt}
-          onExtend={(seconds) =>
-            setRest((current) =>
-              current && {
-                ...current,
-                endsAt: current.endsAt + seconds * 1000,
-              },
-            )
-          }
-          onDismiss={() => setRest(undefined)}
-        />
-      )}
 
       {picking && (
         <ExercisePickerSheet
@@ -212,8 +223,43 @@ export function WorkoutScreen() {
         <WorkoutFinishSheet
           workoutId={id}
           incompleteSets={totalSets - completedSets}
-          onClose={() => setFinishing(false)}
+          endedAt={finishAt}
+          onClose={() => {
+            setFinishing(false)
+            setFinishAt(undefined)
+          }}
           onFinished={() => navigate('/', { replace: true })}
+        />
+      )}
+
+      {askAutoFinish && (
+        <ConfirmDialog
+          title="운동을 종료할까요?"
+          description={
+            <>
+              <p>
+                마지막 세트를 체크한 뒤{' '}
+                {Math.floor((approxNow - lastCompletedAt) / 60000)}분 동안
+                변화가 없습니다.
+              </p>
+              <p className="mt-1">
+                종료하면 지금이 아니라{' '}
+                <b className="tabular-nums">
+                  {new Date(lastCompletedAt).toLocaleTimeString('ko-KR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </b>
+                로 기록됩니다. 쉬는 중이면 계속하기를 누르세요.
+              </p>
+            </>
+          }
+          confirmLabel="종료"
+          onConfirm={() => {
+            setFinishAt(lastCompletedAt)
+            setFinishing(true)
+          }}
+          onCancel={() => setIdleSnoozedAt(approxNow)}
         />
       )}
 

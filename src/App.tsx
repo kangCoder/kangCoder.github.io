@@ -10,6 +10,9 @@ import { FinanceDashboardScreen } from './finance/screens/FinanceDashboardScreen
 import { FinanceLayout } from './finance/screens/FinanceLayout'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AppSwitcher } from './components/AppSwitcher'
+import { RestTimerBar } from './components/RestTimerBar'
+import { RestTimerProvider } from './lib/restTimer'
+import { useRestTimer } from './lib/restTimerContext'
 import { getAppSettings } from './db/appSettings'
 import { AppSettingsScreen } from './screens/AppSettingsScreen'
 import { ConfigErrorScreen } from './screens/ConfigErrorScreen'
@@ -85,10 +88,29 @@ function SignedInApp() {
 function AutoSyncHost() {
   useStartAutoSync()
   return (
-    <>
+    <RestTimerProvider>
       <SignedInShell />
+      {/*
+        타이머 바를 라우트 밖에서 그린다 — 세션 중에 종목 목록이나 지난
+        기록을 보러 가도 남은 시간이 따라와야 한다(spec-v0.5.md §6.2).
+      */}
+      <RestTimerHost />
       <SyncConflictSheet />
-    </>
+    </RestTimerProvider>
+  )
+}
+
+function RestTimerHost() {
+  const { rest, remainingMs, extend, dismiss } = useRestTimer()
+  if (!rest) return null
+  return (
+    <RestTimerBar
+      label={rest.label}
+      remainingMs={remainingMs}
+      totalMs={rest.endsAt - rest.startedAt}
+      onExtend={extend}
+      onDismiss={dismiss}
+    />
   )
 }
 

@@ -4,7 +4,7 @@
 폰과 PC에서 같은 기록을 보게 한다. 전체 DB 스냅샷을 Firestore에 올리고
 내리는 방식이다.
 
-관련 문서: `spec-v0.4.md`(운동), `spec-finance-v0.11.md`(가계부)
+관련 문서: `spec-v0.5.md`(운동), `spec-finance-v0.11.md`(가계부)
 
 ---
 
