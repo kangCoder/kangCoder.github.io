@@ -53,8 +53,27 @@ export async function saveAsset(
   else await financeDb.assets.add({ id: newId(), ...value })
 }
 
+/**
+ * 자산 삭제 — spec-finance-v0.14 §5.7
+ *
+ * **이 자산을 가리키는 연결도 함께 지운다.** 남겨 두면 끊긴 참조가 되어
+ * 카테고리 폼의 선택 칸이 빈칸으로 보이고, 나중에 같은 id가 재사용될 일은
+ * 없지만 "연결했는데 반영이 안 된다"의 원인을 찾기 어려워진다.
+ */
 export async function deleteAsset(id: string): Promise<void> {
-  await financeDb.assets.delete(id)
+  await financeDb.transaction(
+    'rw',
+    [financeDb.assets, financeDb.categories, financeDb.fixedCosts],
+    async () => {
+      await financeDb.assets.delete(id)
+      await financeDb.categories
+        .filter((category) => category.assetId === id)
+        .modify({ assetId: undefined })
+      await financeDb.fixedCosts
+        .filter((cost) => cost.linkedAssetId === id)
+        .modify({ linkedAssetId: undefined })
+    },
+  )
 }
 
 /** epoch ms → 'YYYY-MM-DD' (로컬 시간대) */
@@ -96,8 +115,44 @@ export async function saveDebt(input: DebtInput, id?: string): Promise<void> {
   else await financeDb.debts.add({ id: newId(), ...withBaseline })
 }
 
+/**
+ * 부채 삭제 — spec-finance-v0.14 §5.7, §5.9
+ *
+ * 연결과 함께, **그 부채에 적용된 원천 공제 기록도 지운다.** 남겨 두면
+ * 가리킬 부채가 없어 아무 효과도 없는 기록이 쌓이고, 나중에 같은 이름의
+ * 부채를 다시 만들었을 때 되살아날 수 있다.
+ *
+ * 소득 설정의 `linkedDebtId`는 건드리지 않는다 — 공제 항목 자체는
+ * 유효하고(금액이 급여에서 빠지는 것은 사실이다) 연결만 끊긴 상태다.
+ * `listWithheldLinks`가 없는 부채를 걸러 내므로 급여 흐름은 조용히 멈춘다.
+ */
 export async function deleteDebt(id: string): Promise<void> {
-  await financeDb.debts.delete(id)
+  await financeDb.transaction(
+    'rw',
+    [
+      financeDb.debts,
+      financeDb.categories,
+      financeDb.fixedCosts,
+      financeDb.appliedDeductions,
+    ],
+    async () => {
+      await financeDb.debts.delete(id)
+      await financeDb.categories
+        .filter((category) => category.debtId === id)
+        .modify({ debtId: undefined })
+      await financeDb.fixedCosts
+        .filter((cost) => cost.linkedDebtId === id)
+        .modify({ linkedDebtId: undefined })
+      const orphans = await financeDb.appliedDeductions
+        .filter((row) => row.debtId === id)
+        .toArray()
+      if (orphans.length > 0) {
+        await financeDb.appliedDeductions.bulkDelete(
+          orphans.map((row) => row.id),
+        )
+      }
+    },
+  )
 }
 
 export interface NetWorthBreakdown {

@@ -22,6 +22,7 @@
  *  13. 원천 공제가 부채에 반영되고, 현금은 건드리지 않는다
  *  14. 급여 거래를 지우면 공제도 함께 지워져 부채가 돌아온다
  *  15. 갚은 원금을 순자산에 더하는 옵션
+ *  16. 자산·부채를 지우면 끊긴 연결도 정리된다
  */
 import 'fake-indexeddb/auto'
 
@@ -492,6 +493,67 @@ async function main(): Promise<void> {
   balances = await loadBalances()
   totals2 = computeNetWorth(balances.assets, balances.debts)
   check('원금 없으면 0', totals2.repaidPrincipal, 0)
+
+  console.log('\n[16] 삭제가 끊긴 연결을 정리한다')
+  const { deleteAsset, deleteDebt } = await import('../src/finance/db/assets')
+  await reset()
+  await addAsset({ id: 'a1' })
+  await financeDb.debts.add({
+    id: 'd1',
+    name: '대출',
+    balance: 1_000_000,
+    monthlyPayment: 0,
+    monthlyPrincipal: 0,
+    monthlyInterest: 0,
+    countsInDTI: true,
+    reflectFrom: '2026-10-01',
+  } as never)
+  await addCategory({ id: 'c-save', type: 'SAVING', assetId: 'a1' })
+  await addCategory({ id: 'c-pay', type: 'TRANSFER', debtId: 'd1' })
+  await financeDb.fixedCosts.add({
+    id: 'f1',
+    categoryId: 'c-save',
+    amount: 100_000,
+    dayOfMonth: 25,
+    isActive: true,
+    startCycle: '2026-10',
+    linkedAssetId: 'a1',
+    linkedDebtId: 'd1',
+  } as never)
+  await financeDb.appliedDeductions.add({
+    id: '2026-10:원금',
+    cycleKey: '2026-10',
+    label: '원금',
+    debtId: 'd1',
+    amount: 100_000,
+    appliedAt: 1,
+    date: '2026-10-25',
+  } as never)
+
+  await deleteAsset('a1')
+  check(
+    '카테고리의 assetId 정리',
+    (await financeDb.categories.get('c-save'))?.assetId,
+    undefined,
+  )
+  check(
+    '고정비의 linkedAssetId 정리',
+    (await financeDb.fixedCosts.get('f1'))?.linkedAssetId,
+    undefined,
+  )
+
+  await deleteDebt('d1')
+  check(
+    '카테고리의 debtId 정리',
+    (await financeDb.categories.get('c-pay'))?.debtId,
+    undefined,
+  )
+  check(
+    '고정비의 linkedDebtId 정리',
+    (await financeDb.fixedCosts.get('f1'))?.linkedDebtId,
+    undefined,
+  )
+  check('고아 공제 기록 정리', await financeDb.appliedDeductions.count(), 0)
 
   console.log(failures === 0 ? '\n전부 통과\n' : `\n${failures}건 실패\n`)
   process.exit(failures === 0 ? 0 : 1)
