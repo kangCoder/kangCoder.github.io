@@ -8,6 +8,7 @@ import { Sheet } from '../../components/Sheet'
 import { Label, TextField } from '../../components/fields'
 import { AmountField } from '../components/AmountField'
 import { listAssets, listDebts } from '../db/assets'
+import { pickCashAsset } from '../db/balances'
 import {
   countCategoryUsages,
   createCategory,
@@ -211,8 +212,18 @@ function CategorySheet({
         ? `debt:${category.debtId}`
         : '',
   )
+  const [isSalary, setIsSalary] = useState(category?.isSalary ?? false)
   const assets = useLiveQuery(() => listAssets(), [])
   const debts = useLiveQuery(() => listDebts(), [])
+  /**
+   * 현금 자산은 연결 목록에서 뺀다 — §5.9
+   * 모든 거래의 반대편으로 자동 연결되므로, 명시 연결과 겹치면 두 번 세고
+   * 부호가 항상 +라서 지출에서 반대로 움직인다.
+   */
+  const cashAssetId = assets ? pickCashAsset(assets)?.id : undefined
+  const linkableAssets = (assets ?? []).filter(
+    (asset) => asset.id !== cashAssetId,
+  )
   const [error, setError] = useState<string>()
   const [pendingDelete, setPendingDelete] = useState<number>()
 
@@ -227,6 +238,8 @@ function CategorySheet({
       type,
       budget: budget ?? 0,
       isFixed,
+      // 수입이 아니면 급여 표시를 남기지 않는다 — 유형을 바꿨을 때 유령이 된다
+      isSalary: type === 'INCOME' ? isSalary : undefined,
       // 빈 문자열이 아니라 undefined로 지운다 — §5.7
       assetId: linkId.startsWith('asset:')
         ? linkId.slice('asset:'.length)
@@ -317,6 +330,26 @@ function CategorySheet({
             </div>
           </div>
 
+          {/* 급여 수입 — §5.9. 입력 화면의 자동 채움과 공제 처리를 켠다 */}
+          {type === 'INCOME' && (
+            <div>
+              <label className="flex min-h-11 items-center gap-2 text-[14px] text-zinc-700">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-zinc-900"
+                  checked={isSalary}
+                  onChange={(e) => setIsSalary(e.target.checked)}
+                />
+                급여 수입
+              </label>
+              <p className="text-[11px] leading-relaxed text-zinc-400">
+                켜면 입력 화면에서 이 카테고리를 고를 때 설정한 실수령액이
+                채워지고(수정 가능), 저장할 때 소득 설정에 연결해 둔 부채의
+                원천 공제가 반영됩니다. '기타 소득'은 끄세요.
+              </p>
+            </div>
+          )}
+
           <AmountField label="월 예산" value={budget} onChange={setBudget} />
 
           {/*
@@ -345,9 +378,9 @@ function CategorySheet({
                 className="min-h-11 w-full rounded-xl bg-white px-3 text-[16px] text-zinc-900 ring-1 ring-zinc-300 outline-none focus:ring-2 focus:ring-zinc-900"
               >
                 <option value="">연결 없음</option>
-                {(assets ?? []).length > 0 && (
+                {linkableAssets.length > 0 && (
                   <optgroup label="자산 (늘어남)">
-                    {(assets ?? []).map((asset) => (
+                    {linkableAssets.map((asset) => (
                       <option key={asset.id} value={`asset:${asset.id}`}>
                         {asset.name}
                       </option>

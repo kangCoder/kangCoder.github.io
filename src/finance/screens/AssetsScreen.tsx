@@ -75,6 +75,13 @@ export function AssetsScreen() {
         </div>
       </section>
 
+      {/*
+        현금 자동 연결 상태 — spec-finance-v0.13 §5.9
+        작동하지 않을 때 **왜**를 알려 주지 않으면 "왜 현금이 안 변하지"로
+        끝난다. 조건이 종류와 개수라 화면에서 바로 고칠 수 있다.
+      */}
+      <CashNotice assets={data.assets} />
+
       {data.byKind.length > 0 && (
         <section className="px-4 pb-4">
           <h2 className="mb-2 text-[13px] font-medium text-zinc-500">
@@ -315,7 +322,7 @@ function AssetSheet({
   )
   const [note, setNote] = useState(asset?.note ?? '')
   /**
-   * 편집할 때도 **오늘**이 기본이다 — spec-finance-v0.12 §5.7
+   * 편집할 때도 **오늘**이 기본이다 — spec-finance-v0.13 §5.7
    *
    * 폼에 채워진 잔액은 거래 반영분이 이미 더해진 현재 값이다. 기준일을 옛
    * 날짜로 남기고 저장하면 그 날짜 이후의 거래가 같은 금액 위에 또 더해진다.
@@ -455,6 +462,57 @@ function AssetSheet({
         />
       )}
     </>
+  )
+}
+
+/**
+ * 현금 자동 연결 안내 — §5.9
+ *
+ * 종류가 '현금'인 자산이 정확히 하나일 때만 자동 연결이 작동한다.
+ * 0개면 켤 방법을, 2개 이상이면 왜 꺼졌는지 알려 준다.
+ */
+function CashNotice({ assets }: { assets: EffectiveAsset[] }) {
+  const cashAssets = assets.filter((asset) => asset.kind === 'CASH')
+  if (cashAssets.length === 1) {
+    const cash = cashAssets[0]
+    return (
+      <section className="px-4 pb-3">
+        <p className="rounded-xl bg-zinc-50 p-3 text-[12px] leading-relaxed text-zinc-500 ring-1 ring-zinc-200">
+          <b className="text-zinc-700">{cash.name}</b>이 모든 거래의 반대편으로
+          자동 반영됩니다 — 수입은 더하고 지출·저축·이체는 뺍니다.
+          {cash.reflected !== 0 && (
+            <>
+              {' '}
+              기준일({cash.reflectFrom ?? '?'})부터{' '}
+              <b className="tabular-nums text-zinc-700">
+                {formatWon(cash.reflected)}원
+              </b>{' '}
+              반영됨.
+            </>
+          )}
+        </p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="px-4 pb-3">
+      <p className="rounded-xl bg-amber-50 p-3 text-[12px] leading-relaxed text-amber-800 ring-1 ring-amber-200">
+        {cashAssets.length === 0 ? (
+          <>
+            종류가 <b>현금</b>인 자산이 없어 거래가 현금에 반영되지 않습니다.
+            현금(통장 잔액) 자산을 하나 추가하면 수입·지출이 자동으로
+            반영됩니다.
+          </>
+        ) : (
+          <>
+            종류가 <b>현금</b>인 자산이 {cashAssets.length}개라 자동 반영이
+            꺼져 있습니다. 어느 쪽에서 돈이 나갔는지 알 수 없어 추측하지
+            않습니다. 하나만 '현금'으로 두고 나머지는 다른 종류로 바꾸세요.
+          </>
+        )}
+      </p>
+    </section>
   )
 }
 

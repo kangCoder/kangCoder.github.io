@@ -2,7 +2,7 @@ import { financeDb } from './db'
 import type { Asset, Debt } from './types'
 
 /**
- * 거래를 반영한 실효 잔액 — spec-finance-v0.12 §5.7
+ * 거래를 반영한 실효 잔액 — spec-finance-v0.13 §5.7
  *
  * **잔액을 읽는 곳은 전부 이 함수를 지난다.** 저장된 `balance`를 직접 읽으면
  * 거래 반영분이 빠진 숫자가 나온다.
@@ -30,16 +30,30 @@ import type { Asset, Debt } from './types'
  *
  * 흔한 경우가 조용히 안 되는 것보다 드문 경우를 설명으로 다루는 쪽이 낫다.
  *
- * ### 연결 경로 두 가지
+ * ### 연결 경로
  *
- * - `Category.assetId` / `debtId` — 직접 입력한 거래
- * - `FixedCost.linkedAssetId` / `linkedDebtId` — 고정비에서 생성된 거래
+ * | 경로 | 대상 |
+ * |---|---|
+ * | `Category.assetId` / `debtId` | 직접 입력한 거래 |
+ * | `FixedCost.linkedAssetId` / `linkedDebtId` | 고정비에서 생성된 거래 |
+ * | **현금 자산 자동 연결** | 모든 거래의 반대편 (§5.9) |
+ * | `appliedDeductions` | 급여에서 원천 공제된 부채 상환 (§5.9) |
  *
  * 고정비 경로가 카테고리보다 우선한다. 고정비에 연결을 지정했다면 그쪽이
  * 더 구체적인 의사표시다.
  *
- * 원천 차감(`appliedDeductions`)은 Transaction을 만들지 않으므로 여기서
- * 다루지 않는다. 그쪽은 적용 시점에 잔액을 직접 줄인다(§2.3.1).
+ * ### 현금 자동 연결 (§5.9)
+ *
+ * 돈은 어딘가에서 나와 어딘가로 간다. 저축을 입력하면 적금이 오르는데
+ * 현금이 그대로면 순자산이 저축액만큼 부풀어 오른다. 그래서 현금을
+ * **모든 거래의 반대편**으로 자동 연결한다 — 수입은 더하고, 지출·저축·이체는 뺀다.
+ *
+ * 대상은 `kind === 'CASH'` 자산이 **정확히 하나**일 때 그 자산이다.
+ * 설정 없이 동작해야 하므로 종류로 판단하고, 0개나 2개 이상이면 작동하지
+ * 않는다 — 어느 쪽에 넣을지 추측하면 틀렸을 때 알아차릴 수 없다.
+ *
+ * 현금 자산은 카테고리 명시 연결 대상에서 **제외한다**. 자동과 명시가 겹치면
+ * 같은 거래를 두 번 세고, 명시 연결은 부호가 항상 +라서 지출에서 반대로 움직인다.
  */
 
 export interface EffectiveAsset extends Asset {
@@ -57,34 +71,60 @@ export interface Balances {
   debts: EffectiveDebt[]
 }
 
+/**
+ * 자동 연결 대상 현금 자산. 정확히 하나일 때만 — §5.9
+ *
+ * 둘 이상이면 어느 쪽에서 돈이 나갔는지 알 수 없다. 추측해서 한쪽에
+ * 넣으면 틀렸을 때 숫자만 어긋나고 원인을 짚을 수 없다.
+ */
+export function pickCashAsset<T extends { kind: string }>(
+  assets: T[],
+): T | undefined {
+  const candidates = assets.filter((asset) => asset.kind === 'CASH')
+  return candidates.length === 1 ? candidates[0] : undefined
+}
+
 export async function loadBalances(): Promise<Balances> {
-  const [assets, debts, categories, fixedCosts] = await Promise.all([
-    financeDb.assets.orderBy('kind').toArray(),
-    financeDb.debts.toArray(),
-    financeDb.categories.toArray(),
-    financeDb.fixedCosts.toArray(),
-  ])
+  const [assets, debts, categories, fixedCosts, deductions] = await Promise.all(
+    [
+      financeDb.assets.orderBy('kind').toArray(),
+      financeDb.debts.toArray(),
+      financeDb.categories.toArray(),
+      financeDb.fixedCosts.toArray(),
+      financeDb.appliedDeductions.toArray(),
+    ],
+  )
 
   const assetFrom = new Map(assets.map((a) => [a.id, a.reflectFrom]))
   const debtFrom = new Map(debts.map((d) => [d.id, d.reflectFrom]))
+  const cash = pickCashAsset(assets)
 
-  // 연결이 하나도 없으면 거래를 읽을 이유가 없다
   const assetByCategory = new Map<string, string>()
   const debtByCategory = new Map<string, string>()
   for (const category of categories) {
-    if (category.assetId) assetByCategory.set(category.id, category.assetId)
+    // 현금 자산은 자동 연결이 담당한다 — 명시 연결과 겹치면 두 번 센다
+    if (category.assetId && category.assetId !== cash?.id) {
+      assetByCategory.set(category.id, category.assetId)
+    }
     if (category.debtId) debtByCategory.set(category.id, category.debtId)
   }
   const assetByFixedCost = new Map<string, string>()
   const debtByFixedCost = new Map<string, string>()
   for (const cost of fixedCosts) {
-    if (cost.linkedAssetId) assetByFixedCost.set(cost.id, cost.linkedAssetId)
+    if (cost.linkedAssetId && cost.linkedAssetId !== cash?.id) {
+      assetByFixedCost.set(cost.id, cost.linkedAssetId)
+    }
     if (cost.linkedDebtId) debtByFixedCost.set(cost.id, cost.linkedDebtId)
   }
 
   const linked =
-    assetByCategory.size + debtByCategory.size + assetByFixedCost.size + debtByFixedCost.size
-  if (linked === 0) {
+    assetByCategory.size +
+    debtByCategory.size +
+    assetByFixedCost.size +
+    debtByFixedCost.size
+
+  // 연결도 없고 현금 자산도 없고 공제 기록도 없으면 거래를 읽을 이유가 없다
+  if (linked === 0 && cash === undefined && deductions.length === 0) {
     return {
       assets: assets.map((asset) => ({ ...asset, reflected: 0 })),
       debts: debts.map((debt) => ({ ...debt, reflected: 0 })),
@@ -139,6 +179,45 @@ export async function loadBalances(): Promise<Balances> {
       if (from !== undefined && tx.date >= from) {
         debtReflected.set(debtId, (debtReflected.get(debtId) ?? 0) + tx.amount)
       }
+    }
+
+    /**
+     * 현금 자동 반대편 — §5.9
+     *
+     * 수입은 들어오고 그 밖은 나간다. 저축·투자도 나가는 쪽이다 —
+     * 현금에서 빠져 그 자산으로 옮겨가는 것이므로, 양쪽을 다 움직여야
+     * 순자산이 저축액만큼 부풀지 않는다.
+     */
+    if (cash !== undefined) {
+      const from = assetFrom.get(cash.id)
+      if (from !== undefined && tx.date >= from) {
+        const delta = tx.type === 'INCOME' ? tx.amount : -tx.amount
+        assetReflected.set(
+          cash.id,
+          (assetReflected.get(cash.id) ?? 0) + delta,
+        )
+      }
+    }
+  }
+
+  /**
+   * 원천 공제로 갚은 부채 — §5.9
+   *
+   * 급여에서 바로 빠지므로 Transaction이 없다(§2.3.1 이중 계산 방지).
+   * 그래서 `appliedDeductions`를 거래와 같은 방식으로 합산한다.
+   *
+   * 현금은 건드리지 않는다 — 그 돈은 애초에 현금에 들어오지 않았고,
+   * 급여 거래 금액이 실수령액이므로 이미 빠진 상태다.
+   */
+  for (const row of deductions) {
+    // 날짜가 없는 행은 v0.12 이전에 잔액을 직접 줄여 적용된 것이다
+    if (row.date === undefined) continue
+    const from = debtFrom.get(row.debtId)
+    if (from !== undefined && row.date >= from) {
+      debtReflected.set(
+        row.debtId,
+        (debtReflected.get(row.debtId) ?? 0) + row.amount,
+      )
     }
   }
 

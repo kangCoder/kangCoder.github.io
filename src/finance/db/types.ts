@@ -48,7 +48,7 @@ export interface Category {
   sortOrder: number
   isArchived: boolean
   /**
-   * 이 카테고리의 거래가 쌓는 자산 — spec-finance-v0.12 §5.7
+   * 이 카테고리의 거래가 쌓는 자산 — spec-finance-v0.13 §5.7
    *
    * 거래마다 자산을 고르게 하면 입력이 번거로워진다. 카테고리 단위로 묶고,
    * 세분이 필요하면 카테고리를 쪼갠다('투자' → '투자-ETF', '투자-연금').
@@ -56,6 +56,14 @@ export interface Category {
   assetId?: string
   /** 이 카테고리의 거래가 갚는 부채. assetId와 동시에 쓰지 않는다 */
   debtId?: string
+  /**
+   * 급여 수입인가 — spec-finance-v0.13 §5.9
+   *
+   * `type === 'INCOME'`에서만 의미가 있다. 켜 두면 입력 화면에서 이 카테고리를
+   * 고를 때 설정한 실수령액이 채워지고, 저장할 때 원천 공제가 부채에 반영된다.
+   * '기타 소득'과 구분해야 하므로 유형만으로는 판단할 수 없다.
+   */
+  isSalary?: boolean
 }
 
 /** 매월 반복되는 고정비 — 사이클에 반영하면 Transaction이 된다 */
@@ -90,7 +98,7 @@ export interface Asset {
   isLiquidByTarget: boolean
   note?: string
   /**
-   * 순자산에 포함하는가 — spec-finance-v0.12 §5.8
+   * 순자산에 포함하는가 — spec-finance-v0.13 §5.8
    *
    * 보증금처럼 돌려받긴 하지만 "모으고 있는 돈"이 아닌 자산을 뺀다.
    * undefined는 `kind !== 'DEPOSIT'`으로 읽는다 — 기존 데이터에
@@ -200,6 +208,14 @@ export interface AppliedDeduction {
   debtId: string
   amount: number
   appliedAt: number
+  /**
+   * 급여 날짜 'YYYY-MM-DD' — spec-finance-v0.13 §5.9
+   *
+   * 부채 잔액을 거래와 같은 방식으로 파생하려면 기준일과 비교할 날짜가
+   * 필요하다. **없는 행은 반영하지 않는다** — v0.12 이전에 잔액을 직접
+   * 줄이는 방식으로 적용된 기록이라 이미 잔액에 들어 있다.
+   */
+  date?: string
 }
 
 /**

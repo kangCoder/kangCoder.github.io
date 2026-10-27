@@ -4,7 +4,7 @@
 
 # 가계부 기능
 
-`docs/spec-finance-v0.12.md` 참조. 운동 기록과 독립 모듈이며
+`docs/spec-finance-v0.13.md` 참조. 운동 기록과 독립 모듈이며
 기존 운동 코드는 수정하지 않는다. Dexie DB를 분리한다(`finance-log`).
 
 # 기기 간 동기화
@@ -54,7 +54,7 @@ references 구조라 `-b` 없이 돌리면 대상 파일이 0개여서 아무것
   `finance/lib/netWorth.ts`의 `computeNetWorth()`가 유일한 출처다.
   `financeDb.assets`를 직접 reduce하면 거래 반영분과 보증금 제외가 빠진
   숫자가 나오고, 화면마다 다른 순자산이 보이게 된다
-  (`docs/spec-finance-v0.12.md` §5.7, §5.8)
+  (`docs/spec-finance-v0.13.md` §5.7, §5.8)
 - 백엔드 API를 만들지 않는다. Dexie가 로컬 원본이고 화면은 Dexie만 본다.
   Firestore는 기기 사이의 전달 매체일 뿐 진실 공급원이 아니다.
   Firestore 오프라인 캐시는 끈다 — 두 군데에 같은 데이터를 두면 안 된다.

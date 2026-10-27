@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useMemo, useState } from 'react'
 import { Button, IconButton } from '../../components/Button'
 import { MonthCalendar } from '../../components/MonthCalendar'
+import { Sheet } from '../../components/Sheet'
 import { Label, TextField } from '../../components/fields'
 import { AmountField } from '../components/AmountField'
 import { listCategories } from '../db/categories'
@@ -10,12 +11,19 @@ import { CategoryPickerSheet } from '../components/CategoryPickerSheet'
 import { TYPE_CLASS, TYPE_LABEL } from '../components/categoryTypeMeta'
 import { DEFAULT_PAYDAY, getIncomeSetting } from '../db/income'
 import {
+  applySalaryDeductions,
+  listWithheldLinks,
+  type WithheldLink,
+} from '../db/salary'
+import {
   countUsageByCategory,
   createTransaction,
   deleteTransaction,
   listTransactionsBetween,
 } from '../db/transactions'
 import { formatWon } from '../lib/money'
+import { getCycleKey } from '../lib/cycle'
+import type { TxType } from '../db/types'
 import {
   currentWeek,
   defaultDateInWeek,
@@ -30,17 +38,14 @@ import {
  * 일어난다: 퀵버튼으로 카테고리 → 금액 → 저장.
  */
 export function TransactionFormScreen() {
-  const payday = useLiveQuery(
-    async () => (await getIncomeSetting())?.payday ?? DEFAULT_PAYDAY,
-    [],
-    DEFAULT_PAYDAY,
-  )
+  const income = useLiveQuery(() => getIncomeSetting(), [])
+  const payday = income?.payday ?? DEFAULT_PAYDAY
   const categories = useLiveQuery(() => listCategories(false), [])
   const usage = useLiveQuery(() => countUsageByCategory(), [])
 
   // 입력은 주 단위로 본다. 예산·저축률 집계는 급여 사이클 그대로다(§2.1)
   /**
-   * 내역 보기 — spec-finance-v0.12 §5.1.2
+   * 내역 보기 — spec-finance-v0.13 §5.1.2
    *
    * 주간 목록만 있으면 "지난달 15일에 뭐 썼지"를 찾으려면 주를 여러 번
    * 넘겨야 한다. 캘린더는 한 달을 한눈에 보여 주고, 점의 크기로 그날
@@ -76,6 +81,13 @@ export function TransactionFormScreen() {
   const [error, setError] = useState<string>()
   const [savedAt, setSavedAt] = useState(0)
   const [picking, setPicking] = useState(false)
+  /** 급여 저장 중 원천 공제를 확인하는 단계 — §5.9 */
+  const [deductionStep, setDeductionStep] = useState<{
+    links: WithheldLink[]
+    /** 설정 실수령액과 다른 금액을 넣었는가 */
+    differs: boolean
+  }>()
+  const [overrides, setOverrides] = useState<Record<string, number>>({})
 
   // 퀵버튼에는 실제로 써 본 것만 올린다. 한 번도 안 쓴 카테고리로 채우면
   // 정작 자주 쓰는 것이 밀려난다 — 전체 목록은 시트에서 본다.
@@ -131,6 +143,19 @@ export function TransactionFormScreen() {
     setDate(defaultDateInWeek(next))
   }
 
+  /**
+   * 급여 카테고리를 고르면 설정한 실수령액을 채운다 — §5.9
+   *
+   * 매달 같은 숫자를 다시 치는 것이 가장 잦은 입력인데, 그 값은 이미
+   * 소득 설정에 있다. 수정 가능하게 두어 상여나 변동을 다룬다.
+   */
+  function pickCategory(id: string) {
+    setCategoryId(id)
+    setError(undefined)
+    const next = categories?.find((category) => category.id === id)
+    if (next?.isSalary && income?.netPay) setAmount(income.netPay)
+  }
+
   async function save() {
     if (!selected) {
       setError('카테고리를 고르세요')
@@ -140,21 +165,53 @@ export function TransactionFormScreen() {
       setError('금액을 입력하세요')
       return
     }
+    // 급여는 원천 공제를 함께 처리한다 — 확인 단계를 거친다(§5.9)
+    if (selected.isSalary) {
+      const links = await listWithheldLinks()
+      if (links.length > 0) {
+        const differs =
+          income?.netPay !== undefined && Math.abs(amount) !== income.netPay
+        setOverrides(
+          Object.fromEntries(links.map((l) => [l.label, l.configured])),
+        )
+        setDeductionStep({ links, differs })
+        return
+      }
+    }
+
+    await commit(Math.abs(amount), selected, undefined)
+  }
+
+  /**
+   * 거래를 쓰고, 급여면 원천 공제도 기록한다.
+   *
+   * 공제를 거래보다 먼저 쓰지 않는다 — 거래 저장이 실패하면 공제만 남아
+   * 부채가 줄어든 채 급여 기록이 없는 상태가 된다.
+   */
+  async function commit(
+    value: number,
+    category: { id: string; type: TxType; isFixed: boolean },
+    deductionAmounts: Record<string, number> | undefined,
+  ) {
     await createTransaction(
       {
         date,
-        type: selected.type,
-        categoryId: selected.id,
-        amount: Math.abs(amount),
+        type: category.type,
+        categoryId: category.id,
+        amount: value,
         memo,
-        isFixed: selected.isFixed,
+        isFixed: category.isFixed,
       },
       payday,
     )
+    if (deductionAmounts !== undefined) {
+      await applySalaryDeductions(getCycleKey(date, payday), date, deductionAmounts)
+    }
     // 카테고리는 남긴다 — 같은 항목을 연속으로 넣는 경우가 많다
     setAmount(undefined)
     setMemo('')
     setError(undefined)
+    setDeductionStep(undefined)
     setSavedAt(Date.now())
   }
 
@@ -212,10 +269,7 @@ export function TransactionFormScreen() {
               <button
                 key={category.id}
                 type="button"
-                onClick={() => {
-                  setCategoryId(category.id)
-                  setError(undefined)
-                }}
+                onClick={() => pickCategory(category.id)}
                 className={`min-h-9 rounded-lg px-2.5 text-[13px] font-medium ring-1 transition-colors ${
                   category.id === categoryId
                     ? 'bg-zinc-900 text-white ring-zinc-900'
@@ -269,11 +323,25 @@ export function TransactionFormScreen() {
       {picking && (
         <CategoryPickerSheet
           selectedId={categoryId}
-          onSelect={(category) => {
-            setCategoryId(category.id)
-            setError(undefined)
-          }}
+          onSelect={(category) => pickCategory(category.id)}
           onClose={() => setPicking(false)}
+        />
+      )}
+
+      {deductionStep && selected && (
+        <SalaryDeductionSheet
+          links={deductionStep.links}
+          differs={deductionStep.differs}
+          netPay={income?.netPay}
+          entered={Math.abs(amount ?? 0)}
+          amounts={overrides}
+          onChange={(label, value) =>
+            setOverrides((current) => ({ ...current, [label]: value }))
+          }
+          onConfirm={() =>
+            void commit(Math.abs(amount ?? 0), selected, overrides)
+          }
+          onClose={() => setDeductionStep(undefined)}
         />
       )}
 
@@ -378,6 +446,101 @@ export function TransactionFormScreen() {
         )}
       </section>
     </div>
+  )
+}
+
+/**
+ * 급여 저장 시 원천 공제 확인 — spec-finance-v0.13 §5.9
+ *
+ * 금액이 설정 실수령액과 같으면 설정값을 그대로 쓸지만 확인한다.
+ * 다르면 **공제액도 달라졌을 가능성이 높다** — 상여가 들어왔거나 상환액이
+ * 바뀐 달이다. 그때 설정값을 그대로 적용하면 부채 잔액이 조용히 틀어진다.
+ */
+function SalaryDeductionSheet({
+  links,
+  differs,
+  netPay,
+  entered,
+  amounts,
+  onChange,
+  onConfirm,
+  onClose,
+}: {
+  links: WithheldLink[]
+  differs: boolean
+  netPay: number | undefined
+  entered: number
+  amounts: Record<string, number>
+  onChange: (label: string, value: number) => void
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const [editing, setEditing] = useState(differs)
+
+  return (
+    <Sheet
+      title="급여 공제 확인"
+      onClose={onClose}
+      footer={
+        <Button variant="primary" className="w-full" onClick={onConfirm}>
+          저장
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        {differs && netPay !== undefined && (
+          <p className="rounded-xl bg-amber-50 p-3 text-[13px] leading-relaxed text-amber-800 ring-1 ring-amber-200">
+            입력한 금액 <b className="tabular-nums">{formatWon(entered)}원</b>이
+            설정한 실수령액{' '}
+            <b className="tabular-nums">{formatWon(netPay)}원</b>과 다릅니다.
+            <br />
+            <b>부채로 연결된 공제액도 설정값과 같나요?</b>
+          </p>
+        )}
+
+        <ul className="flex flex-col gap-2">
+          {links.map((link) => (
+            <li
+              key={link.label}
+              className="rounded-xl bg-white p-3 ring-1 ring-zinc-200"
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-zinc-900">
+                  {link.label}
+                </span>
+                <span className="shrink-0 text-[11px] text-zinc-400">
+                  → {link.debtName}
+                </span>
+              </div>
+              {editing ? (
+                <div className="mt-2">
+                  <AmountField
+                    value={amounts[link.label]}
+                    onChange={(value) => onChange(link.label, value ?? 0)}
+                  />
+                </div>
+              ) : (
+                <p className="mt-1 text-[15px] font-semibold tabular-nums text-zinc-900">
+                  {formatWon(amounts[link.label] ?? link.configured)}원
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {!editing && (
+          <Button onClick={() => setEditing(true)}>
+            이번 달 공제액이 다릅니다
+          </Button>
+        )}
+
+        <p className="text-[11px] leading-relaxed text-zinc-400">
+          이 금액만큼 연결된 부채 잔액이 줄어듭니다. 급여에서 이미 공제되어
+          들어온 돈이라 거래로는 잡지 않습니다 — 거래로 잡으면 저축률이 두 번
+          계산됩니다. 같은 사이클에 다시 저장하면 이 기록을 덮어씁니다.
+        </p>
+      </div>
+    </Sheet>
   )
 }
 

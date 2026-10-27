@@ -1,7 +1,7 @@
 import type { Asset, Debt } from '../db/types'
 
 /**
- * 순자산 공식 — spec-finance-v0.12 §5.8
+ * 순자산 공식 — spec-finance-v0.13 §5.8
  *
  * **공식을 여기 한 곳에만 둔다.** 전에는 대시보드·목표·스냅샷·자산 화면·
  * 시뮬레이터가 각자 `assets.reduce(...)`를 돌렸다. 다섯 벌이라 보증금을

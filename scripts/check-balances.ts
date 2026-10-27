@@ -1,5 +1,5 @@
 /**
- * 실효 잔액과 순자산 검증 — spec-finance-v0.12 §5.7, §5.8
+ * 실효 잔액과 순자산 검증 — spec-finance-v0.13 §5.7, §5.8
  *
  * 실행: npm run check:balances
  *
@@ -16,6 +16,10 @@
  *   7. 보증금은 순자산에서 빠지고 제외 합계로 잡힌다
  *   8. countsInNetWorth를 켜면 보증금도 포함된다
  *   9. 기준일이 없으면 반영하지 않는다 (옛 백업 복원 시 폭주 방지)
+ *  10. 현금 자동 연결 — 수입은 +, 지출·저축·이체는 −
+ *  11. 현금 자산이 0개·2개 이상이면 자동 연결이 꺼진다
+ *  12. 저축은 현금에서 빠지고 적금에 들어간다 (순자산 불변)
+ *  13. 원천 공제가 부채에 반영되고, 현금은 건드리지 않는다
  */
 import 'fake-indexeddb/auto'
 
@@ -39,6 +43,7 @@ async function main(): Promise<void> {
     '../src/finance/lib/netWorth'
   )
   const { saveAsset } = await import('../src/finance/db/assets')
+  const { applySalaryDeductions } = await import('../src/finance/db/salary')
 
   await financeDb.open()
 
@@ -48,7 +53,21 @@ async function main(): Promise<void> {
     await financeDb.categories.clear()
     await financeDb.transactions.clear()
     await financeDb.fixedCosts.clear()
+    await financeDb.appliedDeductions.clear()
+    await financeDb.incomeSettings.clear()
   }
+
+  const addCash = (over: Record<string, unknown> = {}) =>
+    financeDb.assets.add({
+      id: 'cash',
+      name: '통장',
+      kind: 'CASH',
+      balance: 2_000_000,
+      updatedAt: 1,
+      isLiquidByTarget: true,
+      reflectFrom: '2026-10-01',
+      ...over,
+    } as never)
 
   const addAsset = (over: Record<string, unknown> = {}) =>
     financeDb.assets.add({
@@ -286,6 +305,102 @@ async function main(): Promise<void> {
   balances = await loadBalances()
   check('기준일 없으면 반영 0', balances.assets[0].reflected, 0)
   check('잔액 그대로', balances.assets[0].balance, 1_000_000)
+
+  console.log('\n[10] 현금 자동 연결 — 부호 방향')
+  await reset()
+  await addCash()
+  await addCategory({ id: 'c-income', type: 'INCOME' })
+  await addCategory({ id: 'c-expense', type: 'EXPENSE' })
+  await addTx('in', '2026-10-25', 3_000_000, {
+    categoryId: 'c-income',
+    type: 'INCOME',
+  })
+  await addTx('out', '2026-10-26', 500_000, {
+    categoryId: 'c-expense',
+    type: 'EXPENSE',
+  })
+  balances = await loadBalances()
+  let cash = balances.assets.find((a) => a.id === 'cash')!
+  check('수입 + / 지출 −', cash.reflected, 2_500_000)
+  check('현금 잔액', cash.balance, 4_500_000)
+
+  console.log('\n[11] 현금 자산 개수 조건')
+  // 0개 — 자동 연결 없음
+  await reset()
+  await addAsset({ id: 'a1', kind: 'SAVINGS' })
+  await addCategory({ id: 'c-expense', type: 'EXPENSE' })
+  await addTx('out', '2026-10-26', 500_000, {
+    categoryId: 'c-expense',
+    type: 'EXPENSE',
+  })
+  balances = await loadBalances()
+  check('현금 0개 → 반영 없음', balances.assets[0].reflected, 0)
+
+  // 2개 — 어느 쪽인지 알 수 없으므로 꺼진다
+  await addCash({ id: 'cash1', name: '통장1' })
+  await addCash({ id: 'cash2', name: '통장2' })
+  balances = await loadBalances()
+  check(
+    '현금 2개 → 둘 다 반영 없음',
+    balances.assets.filter((a) => a.kind === 'CASH').map((a) => a.reflected),
+    [0, 0],
+  )
+
+  console.log('\n[12] 저축은 현금에서 적금으로 — 순자산이 변하지 않는다')
+  await reset()
+  await addCash({ balance: 2_000_000 })
+  await addAsset({ id: 'a1', name: '적금', balance: 0, reflectFrom: '2026-10-01' })
+  await addCategory({ id: 'c-save', type: 'SAVING', assetId: 'a1' })
+  await addTx('s1', '2026-10-20', 700_000, {
+    categoryId: 'c-save',
+    type: 'SAVING',
+  })
+  balances = await loadBalances()
+  cash = balances.assets.find((a) => a.id === 'cash')!
+  const savings = balances.assets.find((a) => a.id === 'a1')!
+  check('현금 감소', cash.balance, 1_300_000)
+  check('적금 증가', savings.balance, 700_000)
+  // 이게 핵심 — 양쪽을 다 움직이지 않으면 순자산이 저축액만큼 부푼다
+  check(
+    '순자산 불변',
+    computeNetWorth(balances.assets, balances.debts).netWorth,
+    2_000_000,
+  )
+
+  console.log('\n[13] 원천 공제 — 부채는 줄고 현금은 그대로')
+  await reset()
+  await addCash({ balance: 2_000_000 })
+  await financeDb.debts.add({
+    id: 'd1',
+    name: '사내대출',
+    balance: 10_000_000,
+    monthlyPayment: 0,
+    monthlyPrincipal: 0,
+    monthlyInterest: 0,
+    countsInDTI: true,
+    reflectFrom: '2026-10-01',
+  } as never)
+  await financeDb.incomeSettings.add({
+    id: 'default',
+    grossPay: 4_000_000,
+    netPay: 3_000_000,
+    payday: 25,
+    deductions: [
+      { label: '사내대출 원금', amount: 400_000, isTransfer: true, linkedDebtId: 'd1' },
+    ],
+  } as never)
+  const applied = await applySalaryDeductions('2026-10', '2026-10-25')
+  check('공제 1건 기록', applied, 1)
+  balances = await loadBalances()
+  check('부채 감소', balances.debts[0].balance, 9_600_000)
+  cash = balances.assets.find((a) => a.id === 'cash')!
+  // 급여 거래 금액이 실수령액이라 이 돈은 애초에 현금에 들어오지 않았다
+  check('현금은 그대로', cash.balance, 2_000_000)
+
+  // 같은 사이클에 다시 부르면 덮어쓴다 (두 번 빠지지 않는다)
+  await applySalaryDeductions('2026-10', '2026-10-25', { '사내대출 원금': 500_000 })
+  balances = await loadBalances()
+  check('재적용은 덮어쓴다', balances.debts[0].balance, 9_500_000)
 
   console.log(failures === 0 ? '\n전부 통과\n' : `\n${failures}건 실패\n`)
   process.exit(failures === 0 ? 0 : 1)
