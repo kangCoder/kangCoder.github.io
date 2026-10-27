@@ -1,4 +1,4 @@
-import { computeNetWorth, countsInNetWorth } from '../lib/netWorth'
+import { computeNetWorth, hiddenFromChart } from '../lib/netWorth'
 import { loadBalances, type EffectiveAsset, type EffectiveDebt } from './balances'
 import { financeDb, newId } from './db'
 import type { AssetKind } from './types'
@@ -29,6 +29,8 @@ export interface AssetInput {
   updatedAt?: number
   /** 순자산에 포함하는가 — §5.8 */
   countsInNetWorth?: boolean
+  /** 자산 구성 그래프에서 숨기는가 — §5.8 */
+  hideFromChart?: boolean
 }
 
 export async function saveAsset(
@@ -54,7 +56,7 @@ export async function saveAsset(
 }
 
 /**
- * 자산 삭제 — spec-finance-v0.14 §5.7
+ * 자산 삭제 — spec-finance-v0.15 §5.7
  *
  * **이 자산을 가리키는 연결도 함께 지운다.** 남겨 두면 끊긴 참조가 되어
  * 카테고리 폼의 선택 칸이 빈칸으로 보이고, 나중에 같은 id가 재사용될 일은
@@ -116,7 +118,7 @@ export async function saveDebt(input: DebtInput, id?: string): Promise<void> {
 }
 
 /**
- * 부채 삭제 — spec-finance-v0.14 §5.7, §5.9
+ * 부채 삭제 — spec-finance-v0.15 §5.7, §5.9
  *
  * 연결과 함께, **그 부채에 적용된 원천 공제 기록도 지운다.** 남겨 두면
  * 가리킬 부채가 없어 아무 효과도 없는 기록이 쌓이고, 나중에 같은 이름의
@@ -171,11 +173,10 @@ export async function getNetWorthBreakdown(): Promise<NetWorthBreakdown> {
   const { assets, debts } = await loadBalances()
   const totals = computeNetWorth(assets, debts)
 
-  // 차트는 순자산을 구성하는 자산만 보여 준다. 보증금이 섞이면
-  // "내가 모으고 있는 자산 구성"을 읽을 수 없다.
+  // 그래프 숨김은 순자산 포함과 **별개 결정**이다 — §5.8
   const kinds = new Map<AssetKind, number>()
   for (const asset of assets) {
-    if (!countsInNetWorth(asset)) continue
+    if (hiddenFromChart(asset)) continue
     kinds.set(asset.kind, (kinds.get(asset.kind) ?? 0) + asset.balance)
   }
 

@@ -4,7 +4,7 @@ import { listTransactionsByCategory } from '../db/transactions'
 import { formatWon } from '../lib/money'
 
 /**
- * 카테고리 세부 내역 — spec-finance-v0.14 §5.1.1
+ * 카테고리 세부 내역 — spec-finance-v0.15 §5.1.1
  *
  * 대시보드는 "식비 42만원"까지만 알려 준다. 예산을 넘겼을 때 바로 묻게 되는
  * 것은 "언제 뭘 썼길래"이고, 그걸 보려면 입력 화면으로 가서 주를 넘겨가며

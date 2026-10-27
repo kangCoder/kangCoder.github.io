@@ -84,7 +84,7 @@ export interface ApplyResult {
   /** 만든 거래 수 */
   created: number
   /**
-   * 잔액에 반영될 부채·자산 수 — spec-finance-v0.14 §5.7
+   * 잔액에 반영될 부채·자산 수 — spec-finance-v0.15 §5.7
    *
    * v0.12부터 **잔액을 직접 고치지 않는다.** 만든 거래가 `balances.ts`의
    * 합산에 자동으로 들어가므로, 여기서 또 더하면 두 번 세게 된다.
@@ -189,7 +189,7 @@ export async function applyWithheldDeductions(
         if (!debt) continue
 
         /**
-         * **잔액을 직접 고치지 않는다** — spec-finance-v0.14 §5.9
+         * **잔액을 직접 고치지 않는다** — spec-finance-v0.15 §5.9
          *
          * 이 기록 자체가 `balances.ts`의 합산에 들어간다. 여기서 또 줄이면
          * 같은 금액을 두 번 뺀다. 고정비 거래와 같은 이유다(§5.7).

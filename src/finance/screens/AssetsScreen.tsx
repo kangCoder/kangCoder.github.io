@@ -35,7 +35,11 @@ import { captureSnapshot, listSnapshots } from '../db/snapshots'
 import type { AssetKind } from '../db/types'
 import { getCycleKey, todayKey } from '../lib/cycle'
 import { formatWon } from '../lib/money'
-import { countsInNetWorth, repaidPrincipal } from '../lib/netWorth'
+import {
+  countsInNetWorth,
+  hiddenFromChart,
+  repaidPrincipal,
+} from '../lib/netWorth'
 
 /** 자산 현황 — §5.4 */
 export function AssetsScreen() {
@@ -74,7 +78,7 @@ export function AssetsScreen() {
       </section>
 
       {/*
-        현금 자동 연결 상태 — spec-finance-v0.14 §5.9
+        현금 자동 연결 상태 — spec-finance-v0.15 §5.9
         작동하지 않을 때 **왜**를 알려 주지 않으면 "왜 현금이 안 변하지"로
         끝난다. 조건이 종류와 개수라 화면에서 바로 고칠 수 있다.
       */}
@@ -224,6 +228,11 @@ export function AssetsScreen() {
                         순자산 제외
                       </span>
                     )}
+                    {hiddenFromChart(asset) && (
+                      <span className="shrink-0 text-[11px] text-zinc-400">
+                        그래프 숨김
+                      </span>
+                    )}
                   </div>
                   <p className="mt-0.5 truncate text-[11px] tabular-nums text-zinc-400">
                     {asset.reflectFrom ?? toDateInput(asset.updatedAt)} 기준
@@ -333,9 +342,12 @@ function AssetSheet({
   const [counts, setCounts] = useState(
     asset ? countsInNetWorth(asset) : true,
   )
+  const [hideChart, setHideChart] = useState(
+    asset ? hiddenFromChart(asset) : false,
+  )
   const [note, setNote] = useState(asset?.note ?? '')
   /**
-   * 편집할 때도 **오늘**이 기본이다 — spec-finance-v0.14 §5.7
+   * 편집할 때도 **오늘**이 기본이다 — spec-finance-v0.15 §5.7
    *
    * 폼에 채워진 잔액은 거래 반영분이 이미 더해진 현재 값이다. 기준일을 옛
    * 날짜로 남기고 저장하면 그 날짜 이후의 거래가 같은 금액 위에 또 더해진다.
@@ -357,6 +369,7 @@ function AssetSheet({
         balance: balance ?? 0,
         isLiquidByTarget: liquid,
         countsInNetWorth: counts,
+        hideFromChart: hideChart,
         note,
         updatedAt: fromDateInput(asOf),
       },
@@ -445,8 +458,24 @@ function AssetSheet({
             순자산에 포함
           </label>
           <p className="-mt-2 text-[11px] leading-relaxed text-zinc-400">
-            보증금처럼 돌려받긴 하지만 모으는 돈이 아닌 자산은 끄세요. 끄면
-            순자산·자산 구성·목표 페이스·시뮬레이터에서 전부 빠집니다.
+            <b>돌려받는 돈이면 켜 두세요.</b> 보증금도 켜는 것이 맞습니다 —
+            끄면 그걸 사려고 빌린 대출만 남아 순자산이 대출액만큼 음수가
+            됩니다. 부채와 짝을 이뤄 지분만 남고, 원금을 갚으면 그만큼
+            올라갑니다. 끄는 쓰임은 <b>돌려받지 않는</b> 금액뿐입니다.
+          </p>
+          <label className="flex min-h-11 items-center gap-2 text-[14px] text-zinc-700">
+            <input
+              type="checkbox"
+              className="size-4 accent-zinc-900"
+              checked={hideChart}
+              onChange={(e) => setHideChart(e.target.checked)}
+            />
+            자산 구성 그래프에서 숨기기
+          </label>
+          <p className="-mt-2 text-[11px] leading-relaxed text-zinc-400">
+            순자산 포함과 <b>별개</b>입니다. 보증금이 그래프에 크게 깔리면
+            적금·투자 비중이 보이지 않으니 숨기되, 순자산에는 남겨 두는 것이
+            맞습니다.
           </p>
           <TextArea label="메모" value={note} onChange={setNote} rows={2} />
           {asset && (
@@ -675,10 +704,14 @@ function DebtSheet({
               상환금액 순자산에 포함
             </label>
             <p className="text-[11px] leading-relaxed text-zinc-400">
-              보증금처럼 <b>순자산에서 제외한 자산</b>을 사기 위해 빌린 돈이면
-              켜세요. 갚은 만큼이 그 자산에 대한 내 지분이 되는데, 자산이
-              순자산에서 빠져 있으면 갚아도 현금만 줄어 순자산이 내려갑니다.
-              켜면 갚은 원금(원금 − 잔액)을 순자산에 더해 그 지분을 되돌립니다.
+              <b>대부분 끄는 것이 맞습니다.</b> 부채 잔액이 줄어드는 것이 이미
+              "내 돈이 되는 과정"이고, 일반 순자산 공식이 그만큼 올려줍니다.
+              여기서 또 더하면 <b>두 번 셉니다</b>.
+              <br />
+              켜는 경우는 하나뿐입니다 — 그 돈으로 산 자산을{' '}
+              <b>자산 목록에 등록하지 않을 때</b>. 예: 차량 할부를 갚는데
+              차를 자산으로 두지 않은 경우. 보증금처럼 자산으로 등록해 두었다면
+              끄세요.
             </p>
             {repaidCounts && original === undefined && (
               <p className="mt-1 text-[12px] text-red-600">

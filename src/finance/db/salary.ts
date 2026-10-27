@@ -2,7 +2,7 @@ import { financeDb } from './db'
 import { getIncomeSetting } from './income'
 
 /**
- * 급여 입력과 원천 공제 — spec-finance-v0.14 §5.9
+ * 급여 입력과 원천 공제 — spec-finance-v0.15 §5.9
  *
  * 회사대출 원금처럼 급여에서 바로 빠지는 상환은 **Transaction을 만들지
  * 않는다.** 만들면 저축률의 분자가 두 번 계산된다(§2.3.1). 그래서 부채

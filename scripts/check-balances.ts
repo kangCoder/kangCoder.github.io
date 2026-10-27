@@ -1,5 +1,5 @@
 /**
- * 실효 잔액과 순자산 검증 — spec-finance-v0.14 §5.7, §5.8
+ * 실효 잔액과 순자산 검증 — spec-finance-v0.15 §5.7, §5.8
  *
  * 실행: npm run check:balances
  *
@@ -13,8 +13,8 @@
  *   4. 잔액을 다시 입력하면 기준일이 리셋되어 이중 계산이 없다
  *   5. 부채는 줄고 0 아래로 내려가지 않는다
  *   6. 고정비 연결이 카테고리 연결보다 우선한다
- *   7. 보증금은 순자산에서 빠지고 제외 합계로 잡힌다
- *   8. countsInNetWorth를 켜면 보증금도 포함된다
+ *   7. 보증금도 기본 포함 (그래프에서만 기본 숨김)
+ *   8. 끄면 빠진다 / 8-a 실제 대출 구조에서 이중 계산 함정
  *   9. 기준일이 없으면 반영하지 않는다 (옛 백업 복원 시 폭주 방지)
  *  10. 현금 자동 연결 — 수입은 +, 지출·저축·이체는 −
  *  11. 현금 자산이 0개·2개 이상이면 자동 연결이 꺼진다
@@ -42,7 +42,7 @@ function check(label: string, actual: unknown, expected: unknown): void {
 async function main(): Promise<void> {
   const { financeDb } = await import('../src/finance/db/db')
   const { loadBalances } = await import('../src/finance/db/balances')
-  const { computeNetWorth, countsInNetWorth } = await import(
+  const { computeNetWorth, countsInNetWorth, hiddenFromChart } = await import(
     '../src/finance/lib/netWorth'
   )
   const { saveAsset } = await import('../src/finance/db/assets')
@@ -260,34 +260,92 @@ async function main(): Promise<void> {
   check('고정비가 가리킨 자산에 반영', byId.get('a2'), 100_000)
   check('카테고리 자산에는 반영 안 됨', byId.get('a1'), 0)
 
-  console.log('\n[7] 보증금은 순자산에서 빠진다')
+  console.log('\n[7] 보증금도 기본적으로 순자산에 포함된다')
   await reset()
   await addAsset({ id: 'a1', name: '적금', kind: 'SAVINGS', balance: 5_000_000 })
   await financeDb.assets.add({
     id: 'a2',
     name: '전세보증금',
     kind: 'DEPOSIT',
-    balance: 100_000_000,
+    balance: 150_000_000,
     updatedAt: 1,
     isLiquidByTarget: false,
     reflectFrom: '2026-10-01',
   } as never)
   balances = await loadBalances()
   let totals = computeNetWorth(balances.assets, balances.debts)
-  check('순자산에 보증금 미포함', totals.netWorth, 5_000_000)
-  check('제외 합계로 잡힘', totals.excludedAssets, 100_000_000)
+  // v0.14까지 기본 제외였다. 보증금을 빼면 그걸 사려고 빌린 대출만 남아
+  // 순자산이 대출액만큼 음수가 된다 — 수준이 틀어진다.
+  check('보증금 포함', totals.netWorth, 155_000_000)
+  check('제외 합계 0', totals.excludedAssets, 0)
   check(
-    'DEPOSIT 기본 제외',
+    'DEPOSIT 기본 포함',
     countsInNetWorth(balances.assets.find((a) => a.id === 'a2')!),
-    false,
+    true,
+  )
+  // 그래프에서는 기본 숨김 — 순자산 포함과 별개 결정이다
+  check(
+    'DEPOSIT 그래프 기본 숨김',
+    hiddenFromChart(balances.assets.find((a) => a.id === 'a2')!),
+    true,
   )
 
-  console.log('\n[8] countsInNetWorth를 켜면 포함된다')
-  await financeDb.assets.update('a2', { countsInNetWorth: true })
+  console.log('\n[8] 끄면 순자산에서 빠진다')
+  await financeDb.assets.update('a2', { countsInNetWorth: false })
   balances = await loadBalances()
   totals = computeNetWorth(balances.assets, balances.debts)
-  check('켜면 순자산에 포함', totals.netWorth, 105_000_000)
-  check('제외 합계 0', totals.excludedAssets, 0)
+  check('끄면 제외', totals.netWorth, 5_000_000)
+  check('제외 합계', totals.excludedAssets, 150_000_000)
+
+  /**
+   * 실제 구조 — 보증금 1.5억 = 전세대출 1.2억(이자만) + 사내대출 3천(원리금).
+   *
+   * "사내대출 원금 상환이 진짜 내 돈이 되는 과정"이라는 직관은 맞다.
+   * 그리고 **일반 공식이 이미 그것을 정확히 반영한다** — 부채 잔액이 줄면
+   * 그만큼 순자산이 올라간다. 여기에 repaidCountsInNetWorth를 더하면
+   * 두 번 센다. 이 테스트가 그 함정을 못 박는다.
+   */
+  console.log('\n[8-a] 보증금·전세대출·사내대출 구조')
+  await reset()
+  await financeDb.assets.add({
+    id: 'dep',
+    name: '전세보증금',
+    kind: 'DEPOSIT',
+    balance: 150_000_000,
+    updatedAt: 1,
+    isLiquidByTarget: false,
+    reflectFrom: '2026-10-01',
+  } as never)
+  const addDebt = (id: string, name: string, balance: number, original: number) =>
+    financeDb.debts.add({
+      id,
+      name,
+      balance,
+      originalAmount: original,
+      monthlyPayment: 0,
+      monthlyPrincipal: 0,
+      monthlyInterest: 0,
+      countsInDTI: true,
+      reflectFrom: '2026-10-01',
+    } as never)
+  await addDebt('jeonse', '전세대출', 120_000_000, 120_000_000)
+  await addDebt('company', '사내대출', 30_000_000, 30_000_000)
+
+  balances = await loadBalances()
+  totals = computeNetWorth(balances.assets, balances.debts)
+  check('시작 지분 0', totals.netWorth, 0)
+
+  // 사내대출 원금 500만을 갚았다
+  await financeDb.debts.update('company', { balance: 25_000_000 })
+  balances = await loadBalances()
+  totals = computeNetWorth(balances.assets, balances.debts)
+  check('원금 500만 갚으면 지분 500만', totals.netWorth, 5_000_000)
+
+  // ★ 여기에 repaidCountsInNetWorth를 켜면 같은 500만을 또 더한다
+  await financeDb.debts.update('company', { repaidCountsInNetWorth: true })
+  balances = await loadBalances()
+  totals = computeNetWorth(balances.assets, balances.debts)
+  check('켜면 두 번 센다 (켜지 말 것)', totals.netWorth, 10_000_000)
 
   console.log('\n[9] 기준일이 없으면 반영하지 않는다')
   // 옛 백업을 복원하거나 구버전 기기의 스냅샷을 받으면 reflectFrom이 없다.
@@ -475,16 +533,16 @@ async function main(): Promise<void> {
     countsInDTI: true,
     reflectFrom: '2026-10-01',
   } as never)
+  // 자산을 추적하지 않는 경우를 재현한다 — 그때만 이 옵션이 맞다
+  await financeDb.assets.update('dep', { countsInNetWorth: false })
   balances = await loadBalances()
   let totals2 = computeNetWorth(balances.assets, balances.debts)
-  // 끄면: 보증금은 빠지고 대출만 남아 순자산이 −9천만
   check('끈 상태 순자산', totals2.netWorth, -90_000_000)
   check('끈 상태 갚은 원금', totals2.repaidPrincipal, 0)
 
   await financeDb.debts.update('d1', { repaidCountsInNetWorth: true })
   balances = await loadBalances()
   totals2 = computeNetWorth(balances.assets, balances.debts)
-  // 켜면: 갚은 1천만이 더해져 −8천만
   check('켠 상태 갚은 원금', totals2.repaidPrincipal, 10_000_000)
   check('켠 상태 순자산', totals2.netWorth, -80_000_000)
 

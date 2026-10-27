@@ -53,7 +53,7 @@ export async function updateTransaction(
 }
 
 /**
- * 거래 삭제 — spec-finance-v0.14 §5.9
+ * 거래 삭제 — spec-finance-v0.15 §5.9
  *
  * **급여 거래가 만든 원천 공제 기록도 함께 지운다.** 공제는 거래가 아니라
  * `appliedDeductions`에 따로 남으므로(§2.3.1), 거래만 지우면 부채가 줄어든
@@ -103,7 +103,7 @@ export function listTransactionsBetween(
 
 /** 오입력 즉시 확인용 — 최근 입력 몇 건(§5.2) */
 /**
- * 한 카테고리의 사이클 내역 — spec-finance-v0.14 §5.1.1
+ * 한 카테고리의 사이클 내역 — spec-finance-v0.15 §5.1.1
  *
  * 복합 인덱스 [cycleKey+categoryId]가 전담한다(§3.1). 대시보드에서
  * 카테고리를 눌러 "언제 얼마를 썼나"를 볼 때 쓴다.

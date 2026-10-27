@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   await db.open()
   await financeDb.open()
   check('workout-log verno', db.verno, 3)
-  // v6 = 거래 반영 기준일(spec-finance-v0.14 §5.7)
+  // v6 = 거래 반영 기준일(spec-finance-v0.15 §5.7)
   check('finance-log verno', financeDb.verno, 6)
   check('workout syncState 존재', db.tables.some((t) => t.name === 'syncState'), true)
   check('finance syncState 존재', financeDb.tables.some((t) => t.name === 'syncState'), true)
