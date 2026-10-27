@@ -1,5 +1,5 @@
 /**
- * 실효 잔액과 순자산 검증 — spec-finance-v0.13 §5.7, §5.8
+ * 실효 잔액과 순자산 검증 — spec-finance-v0.14 §5.7, §5.8
  *
  * 실행: npm run check:balances
  *
@@ -20,6 +20,8 @@
  *  11. 현금 자산이 0개·2개 이상이면 자동 연결이 꺼진다
  *  12. 저축은 현금에서 빠지고 적금에 들어간다 (순자산 불변)
  *  13. 원천 공제가 부채에 반영되고, 현금은 건드리지 않는다
+ *  14. 급여 거래를 지우면 공제도 함께 지워져 부채가 돌아온다
+ *  15. 갚은 원금을 순자산에 더하는 옵션
  */
 import 'fake-indexeddb/auto'
 
@@ -401,6 +403,95 @@ async function main(): Promise<void> {
   await applySalaryDeductions('2026-10', '2026-10-25', { '사내대출 원금': 500_000 })
   balances = await loadBalances()
   check('재적용은 덮어쓴다', balances.debts[0].balance, 9_500_000)
+
+  console.log('\n[14] 급여 거래를 지우면 공제도 돌아온다')
+  // 실제로 막혔던 경로 — 테스트하려고 입력했다 지웠는데 부채가 안 돌아왔다.
+  // 공제는 거래가 아니라 appliedDeductions에 따로 남으므로 함께 지워야 한다.
+  const { createTransaction, deleteTransaction } = await import(
+    '../src/finance/db/transactions'
+  )
+  await reset()
+  await financeDb.debts.add({
+    id: 'd1',
+    name: '사내대출',
+    balance: 10_000_000,
+    monthlyPayment: 0,
+    monthlyPrincipal: 0,
+    monthlyInterest: 0,
+    countsInDTI: true,
+    reflectFrom: '2026-10-01',
+  } as never)
+  await financeDb.incomeSettings.add({
+    id: 'default',
+    grossPay: 4_000_000,
+    netPay: 3_000_000,
+    payday: 25,
+    deductions: [
+      { label: '사내대출 원금', amount: 400_000, isTransfer: true, linkedDebtId: 'd1' },
+    ],
+  } as never)
+  await addCategory({ id: 'c-salary', type: 'INCOME', isSalary: true })
+
+  const salaryId = await createTransaction(
+    {
+      date: '2026-10-25',
+      type: 'INCOME',
+      categoryId: 'c-salary',
+      amount: 3_000_000,
+      isFixed: false,
+    },
+    25,
+  )
+  await applySalaryDeductions('2026-10', '2026-10-25', {}, salaryId)
+  balances = await loadBalances()
+  check('공제 반영됨', balances.debts[0].balance, 9_600_000)
+
+  await deleteTransaction(salaryId)
+  check('공제 기록도 지워짐', await financeDb.appliedDeductions.count(), 0)
+  balances = await loadBalances()
+  check('부채가 돌아옴', balances.debts[0].balance, 10_000_000)
+
+  console.log('\n[15] 갚은 원금을 순자산에 더한다')
+  await reset()
+  // 보증금은 순자산에서 빠지고, 그걸 사려고 빌린 대출은 갚은 만큼 지분이 된다
+  await financeDb.assets.add({
+    id: 'dep',
+    name: '전세보증금',
+    kind: 'DEPOSIT',
+    balance: 100_000_000,
+    updatedAt: 1,
+    isLiquidByTarget: false,
+    reflectFrom: '2026-10-01',
+  } as never)
+  await financeDb.debts.add({
+    id: 'd1',
+    name: '사내대출',
+    balance: 90_000_000,
+    originalAmount: 100_000_000,
+    monthlyPayment: 0,
+    monthlyPrincipal: 0,
+    monthlyInterest: 0,
+    countsInDTI: true,
+    reflectFrom: '2026-10-01',
+  } as never)
+  balances = await loadBalances()
+  let totals2 = computeNetWorth(balances.assets, balances.debts)
+  // 끄면: 보증금은 빠지고 대출만 남아 순자산이 −9천만
+  check('끈 상태 순자산', totals2.netWorth, -90_000_000)
+  check('끈 상태 갚은 원금', totals2.repaidPrincipal, 0)
+
+  await financeDb.debts.update('d1', { repaidCountsInNetWorth: true })
+  balances = await loadBalances()
+  totals2 = computeNetWorth(balances.assets, balances.debts)
+  // 켜면: 갚은 1천만이 더해져 −8천만
+  check('켠 상태 갚은 원금', totals2.repaidPrincipal, 10_000_000)
+  check('켠 상태 순자산', totals2.netWorth, -80_000_000)
+
+  // 원금을 모르면 계산할 수 없다 — 0으로 둔다
+  await financeDb.debts.update('d1', { originalAmount: undefined })
+  balances = await loadBalances()
+  totals2 = computeNetWorth(balances.assets, balances.debts)
+  check('원금 없으면 0', totals2.repaidPrincipal, 0)
 
   console.log(failures === 0 ? '\n전부 통과\n' : `\n${failures}건 실패\n`)
   process.exit(failures === 0 ? 0 : 1)

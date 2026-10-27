@@ -2,7 +2,7 @@ import { financeDb } from './db'
 import { getIncomeSetting } from './income'
 
 /**
- * 급여 입력과 원천 공제 — spec-finance-v0.13 §5.9
+ * 급여 입력과 원천 공제 — spec-finance-v0.14 §5.9
  *
  * 회사대출 원금처럼 급여에서 바로 빠지는 상환은 **Transaction을 만들지
  * 않는다.** 만들면 저축률의 분자가 두 번 계산된다(§2.3.1). 그래서 부채
@@ -57,6 +57,8 @@ export async function applySalaryDeductions(
   cycleKey: string,
   date: string,
   amounts: Record<string, number> = {},
+  /** 이 기록을 만든 급여 거래. 그 거래를 지우면 함께 지워진다 — §5.9 */
+  sourceTransactionId?: string,
 ): Promise<number> {
   const links = await listWithheldLinks()
   if (links.length === 0) return 0
@@ -71,6 +73,7 @@ export async function applySalaryDeductions(
       amount: Math.max(0, Math.trunc(amounts[link.label] ?? link.configured)),
       appliedAt: now,
       date,
+      sourceTransactionId,
     })),
   )
   return links.length

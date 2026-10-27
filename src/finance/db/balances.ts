@@ -2,7 +2,7 @@ import { financeDb } from './db'
 import type { Asset, Debt } from './types'
 
 /**
- * 거래를 반영한 실효 잔액 — spec-finance-v0.13 §5.7
+ * 거래를 반영한 실효 잔액 — spec-finance-v0.14 §5.7
  *
  * **잔액을 읽는 곳은 전부 이 함수를 지난다.** 저장된 `balance`를 직접 읽으면
  * 거래 반영분이 빠진 숫자가 나온다.

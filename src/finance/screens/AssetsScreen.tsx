@@ -35,7 +35,7 @@ import { captureSnapshot, listSnapshots } from '../db/snapshots'
 import type { AssetKind } from '../db/types'
 import { getCycleKey, todayKey } from '../lib/cycle'
 import { formatWon } from '../lib/money'
-import { countsInNetWorth } from '../lib/netWorth'
+import { countsInNetWorth, repaidPrincipal } from '../lib/netWorth'
 
 /** 자산 현황 — §5.4 */
 export function AssetsScreen() {
@@ -63,8 +63,6 @@ export function AssetsScreen() {
         <h1 className="text-[22px] font-bold text-zinc-900">자산</h1>
         <p className="text-[13px] tabular-nums text-zinc-500">
           순자산 {formatWon(data.netWorth)}원
-          {data.excludedAssets !== 0 &&
-            ` · 제외 ${formatWon(data.excludedAssets)}원`}
         </p>
       </header>
 
@@ -76,7 +74,7 @@ export function AssetsScreen() {
       </section>
 
       {/*
-        현금 자동 연결 상태 — spec-finance-v0.13 §5.9
+        현금 자동 연결 상태 — spec-finance-v0.14 §5.9
         작동하지 않을 때 **왜**를 알려 주지 않으면 "왜 현금이 안 변하지"로
         끝난다. 조건이 종류와 개수라 화면에서 바로 고칠 수 있다.
       */}
@@ -266,12 +264,27 @@ export function AssetsScreen() {
                         DTI 제외
                       </span>
                     )}
+                    {debt.repaidCountsInNetWorth && (
+                      <span className="shrink-0 text-[11px] text-emerald-600">
+                        상환 순자산 포함
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] tabular-nums text-zinc-500">
                     월 원금 {formatWon(debt.monthlyPrincipal)} · 이자{' '}
                     {formatWon(debt.monthlyInterest)}
                     {debt.expectedPayoff && ` · ${debt.expectedPayoff} 완납`}
                   </p>
+                  {repaidPrincipal(debt) > 0 && (
+                    <p className="text-[11px] tabular-nums text-emerald-600">
+                      갚은 원금 {formatWon(repaidPrincipal(debt))} 순자산 반영
+                    </p>
+                  )}
+                  {debt.reflected !== 0 && (
+                    <p className="text-[11px] tabular-nums text-zinc-400">
+                      기준일부터 상환 {formatWon(debt.reflected)}
+                    </p>
+                  )}
                 </div>
                 <span className="shrink-0 text-[15px] font-semibold tabular-nums text-red-600">
                   {formatWon(debt.balance)}
@@ -322,7 +335,7 @@ function AssetSheet({
   )
   const [note, setNote] = useState(asset?.note ?? '')
   /**
-   * 편집할 때도 **오늘**이 기본이다 — spec-finance-v0.13 §5.7
+   * 편집할 때도 **오늘**이 기본이다 — spec-finance-v0.14 §5.7
    *
    * 폼에 채워진 잔액은 거래 반영분이 이미 더해진 현재 값이다. 기준일을 옛
    * 날짜로 남기고 저장하면 그 날짜 이후의 거래가 같은 금액 위에 또 더해진다.
@@ -536,6 +549,18 @@ function DebtSheet({
   )
   const [payoff, setPayoff] = useState(debt?.expectedPayoff ?? '')
   const [dti, setDti] = useState(debt?.countsInDTI ?? true)
+  /**
+   * 처음 빌린 금액 — §5.10
+   *
+   * 타입에는 있었지만 폼에 칸이 없어 아무도 넣을 수 없었다. 갚은 원금은
+   * `원금 − 잔액`이라 이 값이 없으면 계산이 되지 않는다.
+   */
+  const [original, setOriginal] = useState<number | undefined>(
+    debt?.originalAmount,
+  )
+  const [repaidCounts, setRepaidCounts] = useState(
+    debt?.repaidCountsInNetWorth ?? false,
+  )
   const [error, setError] = useState<string>()
   const [confirming, setConfirming] = useState(false)
 
@@ -554,6 +579,8 @@ function DebtSheet({
         monthlyInterest: interest ?? 0,
         expectedPayoff: payoff,
         countsInDTI: dti,
+        originalAmount: original,
+        repaidCountsInNetWorth: repaidCounts,
       },
       debt?.id,
     )
@@ -591,6 +618,18 @@ function DebtSheet({
               이미 빠진 금액입니다. 그대로 저장하면 오늘이 새 기준일이 됩니다.
             </p>
           )}
+          <div>
+            <AmountField
+              label="처음 빌린 금액"
+              value={original}
+              onChange={setOriginal}
+            />
+            <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+              학자금처럼 모르면 비워도 됩니다. 아래 '상환금액 순자산에 포함'을
+              쓰려면 필요합니다 — 갚은 금액을 '이 값 − 잔액'으로 계산합니다.
+            </p>
+          </div>
+
           {/* 원금과 이자를 나눠 받는다 — 섞으면 저축률이 왜곡된다(§2.2) */}
           <AmountField
             label="월 상환 원금"
@@ -623,6 +662,32 @@ function DebtSheet({
             />
             DTI에 포함
           </label>
+
+          {/* 갚은 원금을 순자산에 더한다 — §5.10 */}
+          <div>
+            <label className="flex min-h-11 items-center gap-2 text-[14px] text-zinc-700">
+              <input
+                type="checkbox"
+                className="size-4 accent-zinc-900"
+                checked={repaidCounts}
+                onChange={(e) => setRepaidCounts(e.target.checked)}
+              />
+              상환금액 순자산에 포함
+            </label>
+            <p className="text-[11px] leading-relaxed text-zinc-400">
+              보증금처럼 <b>순자산에서 제외한 자산</b>을 사기 위해 빌린 돈이면
+              켜세요. 갚은 만큼이 그 자산에 대한 내 지분이 되는데, 자산이
+              순자산에서 빠져 있으면 갚아도 현금만 줄어 순자산이 내려갑니다.
+              켜면 갚은 원금(원금 − 잔액)을 순자산에 더해 그 지분을 되돌립니다.
+            </p>
+            {repaidCounts && original === undefined && (
+              <p className="mt-1 text-[12px] text-red-600">
+                원금을 입력해야 갚은 금액을 계산할 수 있습니다. 비어 있으면
+                0으로 계산됩니다.
+              </p>
+            )}
+          </div>
+
           {debt && (
             <div className="mt-2 border-t border-zinc-200 pt-4">
               <Button

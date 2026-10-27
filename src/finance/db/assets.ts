@@ -68,6 +68,8 @@ function toDateString(at: number): string {
 export interface DebtInput {
   name: string
   balance: number
+  /** 갚은 원금을 순자산에 더하는가 — §5.10 */
+  repaidCountsInNetWorth?: boolean
   originalAmount?: number
   interestRate?: number
   monthlyPrincipal: number

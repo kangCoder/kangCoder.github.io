@@ -45,7 +45,7 @@ export function TransactionFormScreen() {
 
   // 입력은 주 단위로 본다. 예산·저축률 집계는 급여 사이클 그대로다(§2.1)
   /**
-   * 내역 보기 — spec-finance-v0.13 §5.1.2
+   * 내역 보기 — spec-finance-v0.14 §5.1.2
    *
    * 주간 목록만 있으면 "지난달 15일에 뭐 썼지"를 찾으려면 주를 여러 번
    * 넘겨야 한다. 캘린더는 한 달을 한눈에 보여 주고, 점의 크기로 그날
@@ -211,7 +211,7 @@ export function TransactionFormScreen() {
     category: { id: string; type: TxType; isFixed: boolean },
     deductionAmounts: Record<string, number> | undefined,
   ) {
-    await createTransaction(
+    const transactionId = await createTransaction(
       {
         date,
         type: category.type,
@@ -223,7 +223,13 @@ export function TransactionFormScreen() {
       payday,
     )
     if (deductionAmounts !== undefined) {
-      await applySalaryDeductions(getCycleKey(date, payday), date, deductionAmounts)
+      // 거래 id를 남겨 둔다 — 그 거래를 지우면 공제도 함께 지워진다(§5.9)
+      await applySalaryDeductions(
+        getCycleKey(date, payday),
+        date,
+        deductionAmounts,
+        transactionId,
+      )
     }
     // 카테고리는 남긴다 — 같은 항목을 연속으로 넣는 경우가 많다
     setAmount(undefined)
@@ -482,7 +488,7 @@ function isSalaryCategory(category: {
 }
 
 /**
- * 급여 저장 시 원천 공제 확인 — spec-finance-v0.13 §5.9
+ * 급여 저장 시 원천 공제 확인 — spec-finance-v0.14 §5.9
  *
  * 금액이 설정 실수령액과 같으면 설정값을 그대로 쓸지만 확인한다.
  * 다르면 **공제액도 달라졌을 가능성이 높다** — 상여가 들어왔거나 상환액이
