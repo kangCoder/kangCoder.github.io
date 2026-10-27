@@ -23,6 +23,7 @@
  *  14. 급여 거래를 지우면 공제도 함께 지워져 부채가 돌아온다
  *  15. 갚은 원금을 순자산에 더하는 옵션
  *  16. 자산·부채를 지우면 끊긴 연결도 정리된다
+ *  17. 자산 − 부채 = 순자산 (상환 지분 포함) + 그래프 조각에도 나온다
  */
 import 'fake-indexeddb/auto'
 
@@ -612,6 +613,56 @@ async function main(): Promise<void> {
     undefined,
   )
   check('고아 공제 기록 정리', await financeDb.appliedDeductions.count(), 0)
+
+  /**
+   * 화면의 세 숫자가 어긋나면 어느 것이 맞는지 알 수 없다.
+   *
+   * 상환 지분을 순자산에만 더하고 자산 합계에서 빠뜨려 실제로 어긋났다 —
+   * "상단 자산과 그래프에 안 보인다"는 보고가 그것이다.
+   */
+  console.log('\n[17] 자산 − 부채 = 순자산, 그래프에도 나온다')
+  const { getNetWorthBreakdown } = await import('../src/finance/db/assets')
+  await reset()
+  await addCash({ balance: 5_000_000 })
+  await financeDb.debts.add({
+    id: 'd1',
+    name: '사내대출',
+    balance: 25_000_000,
+    originalAmount: 30_000_000,
+    monthlyPayment: 0,
+    monthlyPrincipal: 0,
+    monthlyInterest: 0,
+    countsInDTI: true,
+    reflectFrom: '2026-10-01',
+    repaidCountsInNetWorth: true,
+  } as never)
+
+  const view = await getNetWorthBreakdown()
+  check('상환 지분 500만', view.repaidPrincipal, 5_000_000)
+  // 현금 500만 + 상환 지분 500만
+  check('자산 합계에 포함', view.totalAssets, 10_000_000)
+  check(
+    '자산 − 부채 = 순자산',
+    view.totalAssets - view.totalDebts,
+    view.netWorth,
+  )
+  check('순자산', view.netWorth, -15_000_000)
+
+  const repaidSlice = view.slices.find((slice) =>
+    slice.key.startsWith('repaid:'),
+  )
+  check('그래프 조각 존재', repaidSlice?.total, 5_000_000)
+  check('조각 라벨', repaidSlice?.label, '사내대출 상환 지분')
+
+  // 끄면 자산 합계와 그래프에서 함께 사라진다
+  await financeDb.debts.update('d1', { repaidCountsInNetWorth: false })
+  const off = await getNetWorthBreakdown()
+  check('끄면 자산 합계에서 빠짐', off.totalAssets, 5_000_000)
+  check(
+    '끄면 그래프 조각도 없다',
+    off.slices.some((slice) => slice.key.startsWith('repaid:')),
+    false,
+  )
 
   console.log(failures === 0 ? '\n전부 통과\n' : `\n${failures}건 실패\n`)
   process.exit(failures === 0 ? 0 : 1)

@@ -62,7 +62,12 @@ export function repaidPrincipal(debt: Debt): number {
 }
 
 export interface NetWorth {
-  /** 순자산에 포함되는 자산 합계 */
+  /**
+   * 순자산에 포함되는 자산 합계. **갚은 원금(상환 지분)을 포함한다** — §5.10
+   *
+   * 포함하지 않으면 화면의 `자산 − 부채`가 `순자산`과 맞지 않는다.
+   * 세 숫자가 어긋나면 어느 것이 맞는지 알 수 없다.
+   */
   totalAssets: number
   totalDebts: number
   netWorth: number
@@ -81,10 +86,12 @@ export function computeNetWorth(assets: Asset[], debts: Debt[]): NetWorth {
   }
   const totalDebts = debts.reduce((sum, debt) => sum + debt.balance, 0)
   const repaid = debts.reduce((sum, debt) => sum + repaidPrincipal(debt), 0)
+  // 상환 지분을 자산에 더해 두면 `자산 − 부채 = 순자산`이 성립한다
+  const assetsWithRepaid = totalAssets + repaid
   return {
-    totalAssets,
+    totalAssets: assetsWithRepaid,
     totalDebts,
-    netWorth: totalAssets - totalDebts + repaid,
+    netWorth: assetsWithRepaid - totalDebts,
     excludedAssets,
     repaidPrincipal: repaid,
   }

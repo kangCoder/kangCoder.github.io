@@ -75,6 +75,13 @@ export function AssetsScreen() {
           <Stat label="자산" value={formatWon(data.totalAssets)} />
           <Stat label="부채" value={formatWon(data.totalDebts)} danger />
         </div>
+        {data.repaidPrincipal > 0 && (
+          <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-400">
+            자산에 <b className="tabular-nums">{formatWon(data.repaidPrincipal)}원</b>의
+            상환 지분이 포함돼 있습니다 — 자산으로 등록하지 않은 대상에 갚아
+            만든 내 몫입니다(부채 설정의 '상환금액 순자산에 포함').
+          </p>
+        )}
       </section>
 
       {/*
@@ -84,7 +91,7 @@ export function AssetsScreen() {
       */}
       <CashNotice assets={data.assets} />
 
-      {data.byKind.length > 0 && (
+      {data.slices.length > 0 && (
         <section className="px-4 pb-4">
           <h2 className="mb-2 text-[13px] font-medium text-zinc-500">
             자산 구성
@@ -94,18 +101,15 @@ export function AssetsScreen() {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={data.byKind}
+                    data={data.slices}
                     dataKey="total"
-                    nameKey="kind"
+                    nameKey="label"
                     innerRadius="55%"
                     outerRadius="85%"
                     strokeWidth={0}
                   >
-                    {data.byKind.map((entry) => (
-                      <Cell
-                        key={entry.kind}
-                        fill={ASSET_KIND_COLOR[entry.kind]}
-                      />
+                    {data.slices.map((entry) => (
+                      <Cell key={entry.key} fill={entry.color} />
                     ))}
                   </Pie>
                   <Tooltip
@@ -116,17 +120,17 @@ export function AssetsScreen() {
               </ResponsiveContainer>
             </div>
             <ul className="mt-1 flex flex-col gap-1">
-              {data.byKind.map((entry) => (
+              {data.slices.map((entry) => (
                 <li
-                  key={entry.kind}
+                  key={entry.key}
                   className="flex items-center gap-2 text-[13px]"
                 >
                   <span
                     className="size-2.5 shrink-0 rounded-full"
-                    style={{ background: ASSET_KIND_COLOR[entry.kind] }}
+                    style={{ background: entry.color }}
                   />
-                  <span className="min-w-0 flex-1 text-zinc-600">
-                    {ASSET_KIND_LABEL[entry.kind]}
+                  <span className="min-w-0 flex-1 truncate text-zinc-600">
+                    {entry.label}
                   </span>
                   <span className="tabular-nums text-zinc-900">
                     {formatWon(entry.total)}

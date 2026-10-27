@@ -27,3 +27,11 @@ export const ASSET_KIND_COLOR: Record<AssetKind, string> = {
   CASH: '#059669',
   DEPOSIT: '#a1a1aa',
 }
+
+/**
+ * 자산이 아닌 조각의 색 — spec-finance-v0.15 §5.10
+ *
+ * '상환 지분'은 자산 목록에 없는 항목이라 종류 색을 쓸 수 없다.
+ * 위 다섯 색과 겹치지 않는 주황을 쓴다.
+ */
+export const REPAID_SHARE_COLOR = '#ea580c'

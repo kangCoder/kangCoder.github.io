@@ -1,4 +1,13 @@
-import { computeNetWorth, hiddenFromChart } from '../lib/netWorth'
+import {
+  ASSET_KIND_COLOR,
+  ASSET_KIND_LABEL,
+  REPAID_SHARE_COLOR,
+} from '../components/assetMeta'
+import {
+  computeNetWorth,
+  hiddenFromChart,
+  repaidPrincipal,
+} from '../lib/netWorth'
 import { loadBalances, type EffectiveAsset, type EffectiveDebt } from './balances'
 import { financeDb, newId } from './db'
 import type { AssetKind } from './types'
@@ -163,10 +172,18 @@ export interface NetWorthBreakdown {
   totalAssets: number
   totalDebts: number
   netWorth: number
-  /** 순자산에서 제외된 자산 합계 (보증금 등) — §5.8 */
+  /** 순자산에서 제외된 자산 합계 — §5.8 */
   excludedAssets: number
-  /** 종류별 합계 — 도넛 차트용. 제외 자산은 들어가지 않는다 */
-  byKind: { kind: AssetKind; total: number }[]
+  /** 순자산에 더해진 갚은 원금 합계 — §5.10 */
+  repaidPrincipal: number
+  /**
+   * 도넛 차트 조각 — §5.10
+   *
+   * 자산 종류뿐 아니라 '상환 지분'처럼 자산 목록에 없는 항목도 들어간다.
+   * 그래서 종류 키가 아니라 **조각이 자기 라벨과 색을 들고 다닌다.**
+   * 고정 키로 두면 합성 조각을 넣을 수 없었다.
+   */
+  slices: { key: string; label: string; color: string; total: number }[]
 }
 
 export async function getNetWorthBreakdown(): Promise<NetWorthBreakdown> {
@@ -180,12 +197,34 @@ export async function getNetWorthBreakdown(): Promise<NetWorthBreakdown> {
     kinds.set(asset.kind, (kinds.get(asset.kind) ?? 0) + asset.balance)
   }
 
+  const slices = [...kinds.entries()].map(([kind, total]) => ({
+    key: kind as string,
+    label: ASSET_KIND_LABEL[kind],
+    color: ASSET_KIND_COLOR[kind],
+    total,
+  }))
+
+  /**
+   * 상환 지분을 조각으로 넣는다 — §5.10
+   *
+   * 순자산에는 더해지는데 그래프에 없으면 "합계가 안 맞는다"로 보인다.
+   * 부채별로 나눠 어느 대출에서 온 지분인지 알 수 있게 한다.
+   */
+  for (const debt of debts) {
+    const repaid = repaidPrincipal(debt)
+    if (repaid <= 0) continue
+    slices.push({
+      key: `repaid:${debt.id}`,
+      label: `${debt.name} 상환 지분`,
+      color: REPAID_SHARE_COLOR,
+      total: repaid,
+    })
+  }
+
   return {
     assets,
     debts,
     ...totals,
-    byKind: [...kinds.entries()]
-      .map(([kind, total]) => ({ kind, total }))
-      .sort((a, b) => b.total - a.total),
+    slices: slices.sort((a, b) => b.total - a.total),
   }
 }
