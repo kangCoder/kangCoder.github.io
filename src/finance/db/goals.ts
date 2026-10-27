@@ -1,3 +1,5 @@
+import { computeNetWorth, countsInNetWorth } from '../lib/netWorth'
+import { loadBalances } from './balances'
 import { financeDb, newId } from './db'
 import type { Goal } from './types'
 
@@ -28,21 +30,21 @@ export async function saveGoal(input: GoalInput): Promise<void> {
   else await financeDb.goals.add({ id: newId(), ...value })
 }
 
+/** 공식은 lib/netWorth.ts에만 있다 — §5.8 */
 export async function getNetWorth(): Promise<number> {
-  const [assets, debts] = await Promise.all([
-    financeDb.assets.toArray(),
-    financeDb.debts.toArray(),
-  ])
-  return (
-    assets.reduce((sum, asset) => sum + asset.balance, 0) -
-    debts.reduce((sum, debt) => sum + debt.balance, 0)
-  )
+  const { assets, debts } = await loadBalances()
+  return computeNetWorth(assets, debts).netWorth
 }
 
-/** 목표 시점에 현금화할 수 있는 자산만 — 시뮬레이터가 자기자금으로 본다(§5.5) */
+/**
+ * 목표 시점에 현금화할 수 있는 자산만 — 시뮬레이터가 자기자금으로 본다(§5.5)
+ *
+ * 순자산 제외 자산(보증금)은 여기서도 뺀다. 집을 살 때 쓸 자기자금에
+ * 지금 살고 있는 집의 보증금을 넣으면 두 번 쓰는 셈이 된다.
+ */
 export async function getLiquidAssets(): Promise<number> {
-  const assets = await financeDb.assets.toArray()
+  const { assets } = await loadBalances()
   return assets
-    .filter((asset) => asset.isLiquidByTarget)
+    .filter((asset) => asset.isLiquidByTarget && countsInNetWorth(asset))
     .reduce((sum, asset) => sum + asset.balance, 0)
 }

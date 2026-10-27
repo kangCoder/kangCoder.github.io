@@ -23,6 +23,14 @@ export interface CategoryInput {
   type: TxType
   budget: number
   isFixed: boolean
+  /**
+   * 이 카테고리의 거래가 쌓는 자산 / 갚는 부채 — spec-finance-v0.12 §5.7
+   *
+   * 빈 문자열이 아니라 undefined로 지워야 한다. 빈 문자열을 남기면
+   * `balances.ts`의 맵에 없는 id가 들어가 조용히 무시된다.
+   */
+  assetId?: string
+  debtId?: string
 }
 
 /** 화면용: 카테고리 + 표시 시점에 붙인 그룹 */

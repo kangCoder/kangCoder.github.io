@@ -1,4 +1,6 @@
 import { shiftCycle } from '../lib/cycle'
+import { computeNetWorth } from '../lib/netWorth'
+import { loadBalances } from './balances'
 import { financeDb } from './db'
 import type { NetWorthSnapshot } from './types'
 
@@ -26,21 +28,17 @@ export async function ensurePreviousSnapshot(
   const previous = shiftCycle(currentCycleKey, -1)
   if (await financeDb.netWorthSnapshots.get(previous)) return false
 
-  const [assets, debts] = await Promise.all([
-    financeDb.assets.toArray(),
-    financeDb.debts.toArray(),
-  ])
+  const { assets, debts } = await loadBalances()
   // 자산도 부채도 없으면 찍을 의미가 없다
   if (assets.length === 0 && debts.length === 0) return false
 
-  const totalAssets = assets.reduce((sum, asset) => sum + asset.balance, 0)
-  const totalDebts = debts.reduce((sum, debt) => sum + debt.balance, 0)
-
+  const totals = computeNetWorth(assets, debts)
   await financeDb.netWorthSnapshots.put({
     cycleKey: previous,
-    totalAssets,
-    totalDebts,
-    netWorth: totalAssets - totalDebts,
+    totalAssets: totals.totalAssets,
+    totalDebts: totals.totalDebts,
+    netWorth: totals.netWorth,
+    excludedAssets: totals.excludedAssets,
     capturedAt: Date.now(),
   })
   return true
@@ -56,17 +54,14 @@ export async function captureSnapshot(
   cycleKey: string,
   asOf?: string,
 ): Promise<void> {
-  const [assets, debts] = await Promise.all([
-    financeDb.assets.toArray(),
-    financeDb.debts.toArray(),
-  ])
-  const totalAssets = assets.reduce((sum, asset) => sum + asset.balance, 0)
-  const totalDebts = debts.reduce((sum, debt) => sum + debt.balance, 0)
+  const { assets, debts } = await loadBalances()
+  const totals = computeNetWorth(assets, debts)
   await financeDb.netWorthSnapshots.put({
     cycleKey,
-    totalAssets,
-    totalDebts,
-    netWorth: totalAssets - totalDebts,
+    totalAssets: totals.totalAssets,
+    totalDebts: totals.totalDebts,
+    netWorth: totals.netWorth,
+    excludedAssets: totals.excludedAssets,
     capturedAt: Date.now(),
     asOf,
   })

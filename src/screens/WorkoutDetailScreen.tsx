@@ -1,4 +1,5 @@
 import { format } from 'date-fns'
+import { formatMinutesSeconds } from '../lib/cardio'
 import { ko } from 'date-fns/locale'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
@@ -266,7 +267,7 @@ function describeSet(
       ? ''
       : `(${SET_TYPE_LABEL[set.setType as keyof typeof SET_TYPE_LABEL]})`
   if (type === 'CARDIO') return `${Math.round((set.seconds ?? 0) / 60)}분${mark}`
-  if (type === 'TIME') return `${set.seconds ?? 0}초${mark}`
+  if (type === 'TIME') return `${formatMinutesSeconds(set.seconds)}${mark}`
   return `${set.weight ?? 0}×${set.reps ?? 0}${mark}`
 }
 

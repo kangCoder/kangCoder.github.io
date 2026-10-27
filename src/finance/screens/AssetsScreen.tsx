@@ -29,18 +29,20 @@ import {
   saveAsset,
   saveDebt,
 } from '../db/assets'
+import type { EffectiveAsset, EffectiveDebt } from '../db/balances'
 import { DEFAULT_PAYDAY, getIncomeSetting } from '../db/income'
 import { captureSnapshot, listSnapshots } from '../db/snapshots'
-import type { Asset, AssetKind, Debt } from '../db/types'
+import type { AssetKind } from '../db/types'
 import { getCycleKey, todayKey } from '../lib/cycle'
 import { formatWon } from '../lib/money'
+import { countsInNetWorth } from '../lib/netWorth'
 
 /** 자산 현황 — §5.4 */
 export function AssetsScreen() {
   const data = useLiveQuery(() => getNetWorthBreakdown(), [])
   const snapshots = useLiveQuery(() => listSnapshots(), [])
-  const [editingAsset, setEditingAsset] = useState<Asset | null>()
-  const [editingDebt, setEditingDebt] = useState<Debt | null>()
+  const [editingAsset, setEditingAsset] = useState<EffectiveAsset | null>()
+  const [editingDebt, setEditingDebt] = useState<EffectiveDebt | null>()
   const [recording, setRecording] = useState(false)
   const payday = useLiveQuery(
     async () => (await getIncomeSetting())?.payday ?? DEFAULT_PAYDAY,
@@ -61,6 +63,8 @@ export function AssetsScreen() {
         <h1 className="text-[22px] font-bold text-zinc-900">자산</h1>
         <p className="text-[13px] tabular-nums text-zinc-500">
           순자산 {formatWon(data.netWorth)}원
+          {data.excludedAssets !== 0 &&
+            ` · 제외 ${formatWon(data.excludedAssets)}원`}
         </p>
       </header>
 
@@ -210,9 +214,16 @@ export function AssetsScreen() {
                         묶임
                       </span>
                     )}
+                    {!countsInNetWorth(asset) && (
+                      <span className="shrink-0 text-[11px] text-amber-600">
+                        순자산 제외
+                      </span>
+                    )}
                   </div>
                   <p className="mt-0.5 truncate text-[11px] tabular-nums text-zinc-400">
-                    {toDateInput(asset.updatedAt)} 기준
+                    {asset.reflectFrom ?? toDateInput(asset.updatedAt)} 기준
+                    {asset.reflected !== 0 &&
+                      ` · 거래 +${formatWon(asset.reflected)}`}
                     {asset.note && ` · ${asset.note}`}
                   </p>
                 </div>
@@ -292,17 +303,25 @@ function AssetSheet({
   asset,
   onClose,
 }: {
-  asset?: Asset
+  asset?: EffectiveAsset
   onClose: () => void
 }) {
   const [name, setName] = useState(asset?.name ?? '')
   const [kind, setKind] = useState<AssetKind>(asset?.kind ?? 'SAVINGS')
   const [balance, setBalance] = useState<number | undefined>(asset?.balance)
   const [liquid, setLiquid] = useState(asset?.isLiquidByTarget ?? true)
-  const [note, setNote] = useState(asset?.note ?? '')
-  const [asOf, setAsOf] = useState(() =>
-    asset ? toDateInput(asset.updatedAt) : todayKey(),
+  const [counts, setCounts] = useState(
+    asset ? countsInNetWorth(asset) : true,
   )
+  const [note, setNote] = useState(asset?.note ?? '')
+  /**
+   * 편집할 때도 **오늘**이 기본이다 — spec-finance-v0.12 §5.7
+   *
+   * 폼에 채워진 잔액은 거래 반영분이 이미 더해진 현재 값이다. 기준일을 옛
+   * 날짜로 남기고 저장하면 그 날짜 이후의 거래가 같은 금액 위에 또 더해진다.
+   * 과거 시점의 잔액을 적는 경우에만 날짜를 되돌린다.
+   */
+  const [asOf, setAsOf] = useState(() => todayKey())
   const [error, setError] = useState<string>()
   const [confirming, setConfirming] = useState(false)
 
@@ -317,6 +336,7 @@ function AssetSheet({
         kind,
         balance: balance ?? 0,
         isLiquidByTarget: liquid,
+        countsInNetWorth: counts,
         note,
         updatedAt: fromDateInput(asOf),
       },
@@ -368,8 +388,17 @@ function AssetSheet({
             </div>
           </div>
           <AmountField label="잔액" value={balance} onChange={setBalance} />
+          {asset && asset.reflected !== 0 && (
+            <p className="rounded-xl bg-zinc-50 p-3 text-[12px] leading-relaxed text-zinc-500 ring-1 ring-zinc-200">
+              위 잔액에는 기준일 이후 거래{' '}
+              <b className="tabular-nums">{formatWon(asset.reflected)}원</b>이
+              이미 더해져 있습니다. 그대로 저장하면 오늘이 새 기준일이 됩니다.
+            </p>
+          )}
           <div>
-            <Label hint="이 잔액이 언제 기준인가">기준일</Label>
+            <Label hint="이 금액이 어느 날 기준인가. 이 날짜 이후의 연결된 거래가 더해진다">
+              기준일
+            </Label>
             <input
               type="date"
               value={asOf}
@@ -386,6 +415,19 @@ function AssetSheet({
             />
             목표 시점에 현금화 가능
           </label>
+          <label className="flex min-h-11 items-center gap-2 text-[14px] text-zinc-700">
+            <input
+              type="checkbox"
+              className="size-4 accent-zinc-900"
+              checked={counts}
+              onChange={(e) => setCounts(e.target.checked)}
+            />
+            순자산에 포함
+          </label>
+          <p className="-mt-2 text-[11px] leading-relaxed text-zinc-400">
+            보증금처럼 돌려받긴 하지만 모으는 돈이 아닌 자산은 끄세요. 끄면
+            순자산·자산 구성·목표 페이스·시뮬레이터에서 전부 빠집니다.
+          </p>
           <TextArea label="메모" value={note} onChange={setNote} rows={2} />
           {asset && (
             <div className="mt-2 border-t border-zinc-200 pt-4">
@@ -416,7 +458,13 @@ function AssetSheet({
   )
 }
 
-function DebtSheet({ debt, onClose }: { debt?: Debt; onClose: () => void }) {
+function DebtSheet({
+  debt,
+  onClose,
+}: {
+  debt?: EffectiveDebt
+  onClose: () => void
+}) {
   const [name, setName] = useState(debt?.name ?? '')
   const [balance, setBalance] = useState<number | undefined>(debt?.balance)
   const [principal, setPrincipal] = useState<number | undefined>(
@@ -478,6 +526,13 @@ function DebtSheet({ debt, onClose }: { debt?: Debt; onClose: () => void }) {
             error={error}
           />
           <AmountField label="잔액" value={balance} onChange={setBalance} />
+          {debt && debt.reflected !== 0 && (
+            <p className="rounded-xl bg-zinc-50 p-3 text-[12px] leading-relaxed text-zinc-500 ring-1 ring-zinc-200">
+              위 잔액은 기준일 이후 상환 거래{' '}
+              <b className="tabular-nums">{formatWon(debt.reflected)}원</b>이
+              이미 빠진 금액입니다. 그대로 저장하면 오늘이 새 기준일이 됩니다.
+            </p>
+          )}
           {/* 원금과 이자를 나눠 받는다 — 섞으면 저축률이 왜곡된다(§2.2) */}
           <AmountField
             label="월 상환 원금"

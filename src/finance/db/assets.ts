@@ -1,14 +1,17 @@
+import { computeNetWorth, countsInNetWorth } from '../lib/netWorth'
+import { loadBalances, type EffectiveAsset, type EffectiveDebt } from './balances'
 import { financeDb, newId } from './db'
-import type { Asset, AssetKind, Debt } from './types'
+import type { AssetKind } from './types'
 
 /** 자산·부채 쿼리 — spec-finance §5.4 */
 
-export function listAssets(): Promise<Asset[]> {
-  return financeDb.assets.orderBy('kind').toArray()
+/** 거래 반영분이 들어간 잔액이다 — §5.7 */
+export async function listAssets(): Promise<EffectiveAsset[]> {
+  return (await loadBalances()).assets
 }
 
-export function listDebts(): Promise<Debt[]> {
-  return financeDb.debts.toArray()
+export async function listDebts(): Promise<EffectiveDebt[]> {
+  return (await loadBalances()).debts
 }
 
 export interface AssetInput {
@@ -24,19 +27,27 @@ export interface AssetInput {
    * 비우면 지금 시각으로 둔다.
    */
   updatedAt?: number
+  /** 순자산에 포함하는가 — §5.8 */
+  countsInNetWorth?: boolean
 }
 
 export async function saveAsset(
   input: AssetInput,
   id?: string,
 ): Promise<void> {
+  const updatedAt = input.updatedAt ?? Date.now()
   const value = {
     ...input,
     name: input.name.trim(),
     balance: Math.trunc(input.balance),
     note: input.note?.trim() || undefined,
     // 잔액이 언제 기준인지가 이 숫자의 신뢰도를 좌우한다
-    updatedAt: input.updatedAt ?? Date.now(),
+    updatedAt,
+    /**
+     * 잔액을 직접 입력했으므로 거래 반영 기준을 그 날짜로 되돌린다 — §5.7
+     * 이걸 하지 않으면 이미 반영된 거래가 새 잔액 위에 또 더해진다.
+     */
+    reflectFrom: toDateString(updatedAt),
   }
   if (id) await financeDb.assets.update(id, value)
   else await financeDb.assets.add({ id: newId(), ...value })
@@ -44,6 +55,14 @@ export async function saveAsset(
 
 export async function deleteAsset(id: string): Promise<void> {
   await financeDb.assets.delete(id)
+}
+
+/** epoch ms → 'YYYY-MM-DD' (로컬 시간대) */
+function toDateString(at: number): string {
+  const date = new Date(at)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
 }
 
 export interface DebtInput {
@@ -69,8 +88,10 @@ export async function saveDebt(input: DebtInput, id?: string): Promise<void> {
       Math.trunc(input.monthlyPrincipal) + Math.trunc(input.monthlyInterest),
     expectedPayoff: input.expectedPayoff?.trim() || undefined,
   }
-  if (id) await financeDb.debts.update(id, value)
-  else await financeDb.debts.add({ id: newId(), ...value })
+  // 자산과 같은 이유로 기준일을 되돌린다 — §5.7
+  const withBaseline = { ...value, reflectFrom: toDateString(Date.now()) }
+  if (id) await financeDb.debts.update(id, withBaseline)
+  else await financeDb.debts.add({ id: newId(), ...withBaseline })
 }
 
 export async function deleteDebt(id: string): Promise<void> {
@@ -78,31 +99,33 @@ export async function deleteDebt(id: string): Promise<void> {
 }
 
 export interface NetWorthBreakdown {
-  assets: Asset[]
-  debts: Debt[]
+  assets: EffectiveAsset[]
+  debts: EffectiveDebt[]
   totalAssets: number
   totalDebts: number
   netWorth: number
-  /** 종류별 합계 — 도넛 차트용 */
+  /** 순자산에서 제외된 자산 합계 (보증금 등) — §5.8 */
+  excludedAssets: number
+  /** 종류별 합계 — 도넛 차트용. 제외 자산은 들어가지 않는다 */
   byKind: { kind: AssetKind; total: number }[]
 }
 
 export async function getNetWorthBreakdown(): Promise<NetWorthBreakdown> {
-  const [assets, debts] = await Promise.all([listAssets(), listDebts()])
-  const totalAssets = assets.reduce((sum, asset) => sum + asset.balance, 0)
-  const totalDebts = debts.reduce((sum, debt) => sum + debt.balance, 0)
+  const { assets, debts } = await loadBalances()
+  const totals = computeNetWorth(assets, debts)
 
+  // 차트는 순자산을 구성하는 자산만 보여 준다. 보증금이 섞이면
+  // "내가 모으고 있는 자산 구성"을 읽을 수 없다.
   const kinds = new Map<AssetKind, number>()
   for (const asset of assets) {
+    if (!countsInNetWorth(asset)) continue
     kinds.set(asset.kind, (kinds.get(asset.kind) ?? 0) + asset.balance)
   }
 
   return {
     assets,
     debts,
-    totalAssets,
-    totalDebts,
-    netWorth: totalAssets - totalDebts,
+    ...totals,
     byKind: [...kinds.entries()]
       .map(([kind, total]) => ({ kind, total }))
       .sort((a, b) => b.total - a.total),

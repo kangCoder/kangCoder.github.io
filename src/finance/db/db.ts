@@ -115,6 +115,35 @@ class FinanceDB extends Dexie {
     this.version(5).stores({
       syncState: 'id',
     })
+
+    /**
+     * v6 — 거래 반영 기준일 — spec-finance-v0.12 §5.7
+     *
+     * 기존 잔액에는 고정비 반영분이 이미 증분으로 더해져 있다. 그 상태에서
+     * 거래 합산을 켜면 같은 금액을 두 번 세게 된다. 그래서 모든 자산·부채의
+     * 기준일을 **마이그레이션 시점의 오늘**로 박아, 그 이전 거래는 세지 않는다.
+     *
+     * 지연 기본값(undefined를 오늘로 읽기)으로 처리할 수 없는 이유 —
+     * 읽는 시점마다 '오늘'이 달라져 어제 넣은 거래가 내일 사라진다.
+     * 기준일은 한 번 정해져 고정돼야 한다.
+     */
+    this.version(6)
+      .stores({})
+      .upgrade(async (tx) => {
+        const today = new Date().toISOString().slice(0, 10)
+        await tx
+          .table('assets')
+          .toCollection()
+          .modify((asset: { reflectFrom?: string }) => {
+            asset.reflectFrom ??= today
+          })
+        await tx
+          .table('debts')
+          .toCollection()
+          .modify((debt: { reflectFrom?: string }) => {
+            debt.reflectFrom ??= today
+          })
+      })
   }
 }
 

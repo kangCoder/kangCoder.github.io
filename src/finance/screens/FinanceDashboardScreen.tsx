@@ -5,7 +5,12 @@ import { Button, IconButton } from '../../components/Button'
 import { Sheet } from '../../components/Sheet'
 import { AmountField } from '../components/AmountField'
 import { clearCycleBudget, setCycleBudget } from '../db/cycleBudget'
-import { getCycleSummary, type GroupSpending } from '../db/dashboard'
+import { CategoryDetailSheet } from '../components/CategoryDetailSheet'
+import {
+  getCycleSummary,
+  type CategorySpending,
+  type GroupSpending,
+} from '../db/dashboard'
 import { DEFAULT_PAYDAY, getIncomeSetting } from '../db/income'
 import {
   getCurrentCycleKey,
@@ -29,6 +34,8 @@ export function FinanceDashboardScreen() {
   const cycleKey = shiftCycle(getCurrentCycleKey(payday), offset)
 
   const summary = useLiveQuery(() => getCycleSummary(cycleKey), [cycleKey])
+  /** 세부 내역을 펼친 카테고리 — §5.1.1 */
+  const [pickedCategory, setPickedCategory] = useState<CategorySpending>()
 
   const range = getCycleRange(cycleKey, payday)
   const remaining =
@@ -69,6 +76,17 @@ export function FinanceDashboardScreen() {
           isCustom={summary.budgetIsCustom}
           categoryTotal={summary.categoryBudgetTotal}
           onClose={() => setEditingBudget(false)}
+        />
+      )}
+
+      {pickedCategory && (
+        <CategoryDetailSheet
+          cycleKey={cycleKey}
+          categoryId={pickedCategory.categoryId}
+          name={pickedCategory.name}
+          spent={pickedCategory.spent}
+          budget={pickedCategory.budget}
+          onClose={() => setPickedCategory(undefined)}
         />
       )}
 
@@ -161,6 +179,7 @@ export function FinanceDashboardScreen() {
                     key={entry.groupId}
                     entry={entry}
                     kind="expense"
+                    onPickCategory={setPickedCategory}
                     expanded={expanded === entry.groupId}
                     onToggle={() =>
                       setExpanded(
@@ -184,6 +203,7 @@ export function FinanceDashboardScreen() {
                     key={entry.groupId}
                     entry={entry}
                     kind="saving"
+                    onPickCategory={setPickedCategory}
                     expanded={expanded === entry.groupId}
                     onToggle={() =>
                       setExpanded(
@@ -302,12 +322,14 @@ function GroupRow({
   kind,
   expanded,
   onToggle,
+  onPickCategory,
 }: {
   entry: GroupSpending
   /** 지출은 예산을 넘으면 나쁘고, 저축은 더 모으면 좋다 */
   kind: 'expense' | 'saving'
   expanded: boolean
   onToggle: () => void
+  onPickCategory: (row: CategorySpending) => void
 }) {
   const isSaving = kind === 'saving'
   const over = entry.budget > 0 && entry.spent > entry.budget
@@ -365,7 +387,13 @@ function GroupRow({
       {expanded && (
         <ul className="mt-2 flex flex-col gap-1 border-t border-zinc-100 pt-2">
           {entry.categories.map((row) => (
-            <li key={row.categoryId} className="flex items-baseline gap-2">
+            <li key={row.categoryId}>
+              {/* 누르면 그 카테고리의 사이클 내역을 펼친다 — §5.1.1 */}
+              <button
+                type="button"
+                className="flex w-full items-baseline gap-2 rounded-lg py-1 text-left active:bg-zinc-50"
+                onClick={() => onPickCategory(row)}
+              >
               <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-600">
                 {row.name}
               </span>
@@ -389,6 +417,7 @@ function GroupRow({
                   </span>
                 )}
               </span>
+              </button>
             </li>
           ))}
         </ul>

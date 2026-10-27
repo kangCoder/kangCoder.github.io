@@ -47,6 +47,15 @@ export interface Category {
   isFixed: boolean
   sortOrder: number
   isArchived: boolean
+  /**
+   * 이 카테고리의 거래가 쌓는 자산 — spec-finance-v0.12 §5.7
+   *
+   * 거래마다 자산을 고르게 하면 입력이 번거로워진다. 카테고리 단위로 묶고,
+   * 세분이 필요하면 카테고리를 쪼갠다('투자' → '투자-ETF', '투자-연금').
+   */
+  assetId?: string
+  /** 이 카테고리의 거래가 갚는 부채. assetId와 동시에 쓰지 않는다 */
+  debtId?: string
 }
 
 /** 매월 반복되는 고정비 — 사이클에 반영하면 Transaction이 된다 */
@@ -80,12 +89,29 @@ export interface Asset {
   /** 목표 시점에 현금화 가능 여부 */
   isLiquidByTarget: boolean
   note?: string
+  /**
+   * 순자산에 포함하는가 — spec-finance-v0.12 §5.8
+   *
+   * 보증금처럼 돌려받긴 하지만 "모으고 있는 돈"이 아닌 자산을 뺀다.
+   * undefined는 `kind !== 'DEPOSIT'`으로 읽는다 — 기존 데이터에
+   * 마이그레이션을 쓰지 않기 위한 지연 기본값이다.
+   */
+  countsInNetWorth?: boolean
+  /**
+   * 거래 반영 기준일 'YYYY-MM-DD' — §5.7
+   *
+   * `balance`가 이 날짜 기준이라는 뜻이고, **이 날짜보다 뒤의** 연결된
+   * 거래만 더한다. 잔액을 직접 입력하면 그 날짜로 갱신되므로 이중 계산이 없다.
+   */
+  reflectFrom?: string
 }
 
 export interface Debt {
   id: string
   name: string
   balance: number
+  /** 거래 반영 기준일 'YYYY-MM-DD' — Asset.reflectFrom과 같은 규약(§5.7) */
+  reflectFrom?: string
   /** 학자금처럼 원금을 모르는 경우가 있다(§4.6) */
   originalAmount?: number
   /** 연 %. 〃 */
@@ -114,6 +140,14 @@ export interface NetWorthSnapshot {
   totalAssets: number
   totalDebts: number
   netWorth: number
+  /**
+   * 순자산에서 제외된 자산 합계 (보증금 등) — v0.12에서 추가.
+   *
+   * **없는 행은 옛 공식으로 계산된 것이다.** v0.12 이전 스냅샷은
+   * 보증금을 순자산에 포함해 찍혀 있어, 추이 그래프에 한 번 단절이 생긴다.
+   * 과거 잔액이 어디에도 없으므로 다시 계산할 수 없다(§5.4, §5.8).
+   */
+  excludedAssets?: number
   /** 실제로 기록한 시각 */
   capturedAt: number
   /**

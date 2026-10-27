@@ -1,5 +1,6 @@
 import type { Asset, Debt } from '../db/types'
 import { INCIDENTAL_RATE, type LoanPolicy } from './loanPolicy'
+import { countsInNetWorth } from './netWorth'
 
 /**
  * 목표 시뮬레이터 계산 — spec-finance §5.5
@@ -130,8 +131,16 @@ export function simulateProjection(params: {
   annualRate: number
   months: number
 }): Projection {
-  const liquid = params.assets.filter((asset) => asset.isLiquidByTarget)
-  const illiquid = params.assets
+  /**
+   * 순자산에서 제외한 자산(보증금)은 자기자금으로도 세지 않는다 — §5.8
+   *
+   * 지금 살고 있는 집의 보증금을 새 집의 자기자금에 넣으면 같은 돈을
+   * 두 번 쓰는 셈이 된다. 순자산 정의와 어긋나면 "순자산은 1억인데
+   * 자기자금은 1억 5천"처럼 설명할 수 없는 화면이 된다.
+   */
+  const counted = params.assets.filter(countsInNetWorth)
+  const liquid = counted.filter((asset) => asset.isLiquidByTarget)
+  const illiquid = counted
     .filter((asset) => !asset.isLiquidByTarget)
     .reduce((sum, asset) => sum + asset.balance, 0)
 

@@ -12,6 +12,7 @@ import {
   nextSetType,
 } from '../components/setTypeMeta'
 import { unlockAlarm } from '../lib/alarm'
+import { joinSeconds, splitSeconds } from '../lib/cardio'
 import { formatDuration } from '../lib/duration'
 import { useRestTimer } from '../lib/restTimerContext'
 import { useElapsed } from '../lib/useElapsed'
@@ -418,12 +419,34 @@ function SetRow({
           }
         />
       ) : (
-        <NumberField
-          key={`${set.id}-seconds`}
-          value={set.seconds}
-          suffix="초"
-          onChange={(seconds) => updateWorkoutSet(set.id, { seconds })}
-        />
+        /**
+         * TIME은 분·초 두 칸으로 받는다 — spec-v0.5.md §4.1.1
+         *
+         * 러닝을 '시간' 타입으로 등록하면 32분 30초를 1950초로 적어야 했다.
+         * 플랭크는 분을 비우고 초만 적으면 되므로 양쪽이 다 자연스럽다.
+         */
+        <>
+          <NumberField
+            key={`${set.id}-min`}
+            value={splitSeconds(set.seconds).minutes}
+            suffix="분"
+            onChange={(minutes) =>
+              updateWorkoutSet(set.id, {
+                seconds: joinSeconds(minutes, splitSeconds(set.seconds).seconds),
+              })
+            }
+          />
+          <NumberField
+            key={`${set.id}-sec`}
+            value={splitSeconds(set.seconds).seconds}
+            suffix="초"
+            onChange={(seconds) =>
+              updateWorkoutSet(set.id, {
+                seconds: joinSeconds(splitSeconds(set.seconds).minutes, seconds),
+              })
+            }
+          />
+        </>
       )}
 
       <button

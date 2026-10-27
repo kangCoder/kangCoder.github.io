@@ -1,6 +1,8 @@
+import { endOfMonth, format as formatDate, startOfMonth } from 'date-fns'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useMemo, useState } from 'react'
 import { Button, IconButton } from '../../components/Button'
+import { MonthCalendar } from '../../components/MonthCalendar'
 import { Label, TextField } from '../../components/fields'
 import { AmountField } from '../components/AmountField'
 import { listCategories } from '../db/categories'
@@ -37,10 +39,33 @@ export function TransactionFormScreen() {
   const usage = useLiveQuery(() => countUsageByCategory(), [])
 
   // 입력은 주 단위로 본다. 예산·저축률 집계는 급여 사이클 그대로다(§2.1)
+  /**
+   * 내역 보기 — spec-finance-v0.12 §5.1.2
+   *
+   * 주간 목록만 있으면 "지난달 15일에 뭐 썼지"를 찾으려면 주를 여러 번
+   * 넘겨야 한다. 캘린더는 한 달을 한눈에 보여 주고, 점의 크기로 그날
+   * 입력이 있었는지가 즉시 읽힌다.
+   */
+  const [view, setView] = useState<'week' | 'calendar'>('week')
+  const [month, setMonth] = useState(() => new Date())
+  const [pickedDay, setPickedDay] = useState<string>()
   const [week, setWeek] = useState<WeekInfo>(() => currentWeek())
   const inWeek = useLiveQuery(
     () => listTransactionsBetween(week.start, week.end),
     [week.start, week.end],
+  )
+
+  // 캘린더를 보지 않을 때는 쿼리하지 않는다
+  const monthRange = {
+    start: formatDate(startOfMonth(month), 'yyyy-MM-dd'),
+    end: formatDate(endOfMonth(month), 'yyyy-MM-dd'),
+  }
+  const inMonth = useLiveQuery(
+    () =>
+      view === 'calendar'
+        ? listTransactionsBetween(monthRange.start, monthRange.end)
+        : Promise.resolve(undefined),
+    [view, monthRange.start, monthRange.end],
   )
 
   const [categoryId, setCategoryId] = useState<string>()
@@ -65,6 +90,31 @@ export function TransactionFormScreen() {
     (category) => category.id === categoryId,
   )
   // 이 주에 실제로 쓴 돈 — 지출만 센다
+  /** 캘린더 점 — 날짜별 입력 건수 */
+  const dayMarks = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const tx of inMonth ?? []) {
+      counts.set(tx.date, (counts.get(tx.date) ?? 0) + 1)
+    }
+    return [...counts.entries()].map(([date, count]) => ({
+      date: new Date(`${date}T00:00:00`),
+      count,
+    }))
+  }, [inMonth])
+
+  /** 지금 목록에 보여 줄 거래 — 보기 모드와 선택한 날짜에 따라 달라진다 */
+  const listed = useMemo(() => {
+    if (view === 'week') return inWeek
+    if (inMonth === undefined) return undefined
+    return pickedDay === undefined
+      ? inMonth
+      : inMonth.filter((tx) => tx.date === pickedDay)
+  }, [view, inWeek, inMonth, pickedDay])
+
+  const listedTotal = (listed ?? [])
+    .filter((tx) => tx.type === 'EXPENSE')
+    .reduce((sum, tx) => sum + tx.amount, 0)
+
   const weekTotal = (inWeek ?? [])
     .filter((tx) => tx.type === 'EXPENSE')
     .reduce((sum, tx) => sum + tx.amount, 0)
@@ -227,21 +277,59 @@ export function TransactionFormScreen() {
       )}
 
       <section className="px-4 pb-4">
-        <div className="mb-2 flex items-baseline justify-between">
-          <h2 className="text-[13px] font-medium text-zinc-500">
-            {week.label} 내역
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <h2 className="min-w-0 flex-1 truncate text-[13px] font-medium text-zinc-500">
+            {view === 'week'
+              ? `${week.label} 내역`
+              : pickedDay
+                ? `${pickedDay} 내역`
+                : `${formatDate(month, 'M월')} 캘린더`}
           </h2>
-          <span className="text-[13px] tabular-nums text-zinc-500">
-            {formatWon(weekTotal)}원
+          <span className="shrink-0 text-[13px] tabular-nums text-zinc-500">
+            {formatWon(view === 'week' ? weekTotal : listedTotal)}원
           </span>
+          {/* 보기 전환 — 주간은 입력 직후 확인용, 캘린더는 지난 날 찾기용 */}
+          <button
+            type="button"
+            className="shrink-0 rounded-lg px-2 py-1 text-[12px] font-medium text-zinc-600 ring-1 ring-zinc-300"
+            onClick={() => {
+              setView((current) => (current === 'week' ? 'calendar' : 'week'))
+              setPickedDay(undefined)
+            }}
+          >
+            {view === 'week' ? '캘린더' : '주간'}
+          </button>
         </div>
-        {inWeek === undefined ? null : inWeek.length === 0 ? (
+
+        {view === 'calendar' && (
+          <div className="mb-2">
+            <MonthCalendar
+              month={month}
+              onMonthChange={(next) => {
+                setMonth(next)
+                setPickedDay(undefined)
+              }}
+              marks={dayMarks}
+              onSelectDay={(date) => {
+                const key = formatDate(date, 'yyyy-MM-dd')
+                // 같은 날을 다시 누르면 해제해 그 달 전체로 돌아간다
+                setPickedDay((current) => (current === key ? undefined : key))
+              }}
+            />
+          </div>
+        )}
+
+        {listed === undefined ? null : listed.length === 0 ? (
           <p className="rounded-xl bg-white px-3 py-6 text-center text-[13px] text-zinc-400 ring-1 ring-zinc-200">
-            이 주에는 입력이 없습니다
+            {view === 'week'
+              ? '이 주에는 입력이 없습니다'
+              : pickedDay
+                ? '이 날에는 입력이 없습니다'
+                : '이 달에는 입력이 없습니다'}
           </p>
         ) : (
           <ul className="flex flex-col gap-1.5">
-            {inWeek.map((tx) => (
+            {listed.map((tx) => (
               <li
                 key={tx.id}
                 className="flex items-center gap-2 rounded-xl bg-white p-3 ring-1 ring-zinc-200"

@@ -12,7 +12,9 @@
     "check:auth": "tsx scripts/check-auth.ts",
     "check:snapshot": "tsx scripts/check-snapshot.ts",
     "check:mutations": "tsx scripts/check-mutations.ts",
-    "check": "npm run check:db && npm run check:auth && npm run check:snapshot && npm run check:mutations",
+    "check:balances": "tsx scripts/check-balances.ts",
+    "check:time": "tsx scripts/check-time.ts",
+    "check": "npm run check:db && npm run check:auth && npm run check:snapshot && npm run check:mutations && npm run check:balances && npm run check:time",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -1,4 +1,5 @@
 import { format } from 'date-fns'
+import { formatMinutesSeconds } from './cardio'
 import { ko } from 'date-fns/locale'
 import type { WeeklyReportData } from '../db/weeklyReport'
 import type { WorkoutReport } from '../db/workouts'
@@ -127,7 +128,7 @@ function renderItemRow(
       if (item.exerciseType === 'CARDIO') {
         return `${Math.round((set.seconds ?? 0) / 60)}분`
       }
-      if (item.exerciseType === 'TIME') return `${set.seconds ?? 0}초`
+      if (item.exerciseType === 'TIME') return formatMinutesSeconds(set.seconds)
       return `${trim(set.weight ?? 0)}×${set.reps ?? 0}`
     })
     .join(', ')

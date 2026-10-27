@@ -7,6 +7,7 @@ import { EmptyState } from '../../components/EmptyState'
 import { Sheet } from '../../components/Sheet'
 import { Label, TextField } from '../../components/fields'
 import { AmountField } from '../components/AmountField'
+import { listAssets, listDebts } from '../db/assets'
 import {
   countCategoryUsages,
   createCategory,
@@ -202,6 +203,16 @@ function CategorySheet({
   const [budget, setBudget] = useState<number | undefined>(category?.budget ?? 0)
   const [selectedGroup, setSelectedGroup] = useState(category?.groupId ?? groupId)
   const [isFixed, setIsFixed] = useState(category?.isFixed ?? false)
+  /** 자산·부채 연결 — §5.7. 둘 중 하나만 고를 수 있다 */
+  const [linkId, setLinkId] = useState(
+    category?.assetId
+      ? `asset:${category.assetId}`
+      : category?.debtId
+        ? `debt:${category.debtId}`
+        : '',
+  )
+  const assets = useLiveQuery(() => listAssets(), [])
+  const debts = useLiveQuery(() => listDebts(), [])
   const [error, setError] = useState<string>()
   const [pendingDelete, setPendingDelete] = useState<number>()
 
@@ -216,6 +227,13 @@ function CategorySheet({
       type,
       budget: budget ?? 0,
       isFixed,
+      // 빈 문자열이 아니라 undefined로 지운다 — §5.7
+      assetId: linkId.startsWith('asset:')
+        ? linkId.slice('asset:'.length)
+        : undefined,
+      debtId: linkId.startsWith('debt:')
+        ? linkId.slice('debt:'.length)
+        : undefined,
     }
     if (category) await updateCategory(category.id, input)
     else await createCategory(input)
@@ -300,6 +318,46 @@ function CategorySheet({
           </div>
 
           <AmountField label="월 예산" value={budget} onChange={setBudget} />
+
+          {/* 자산·부채 연결 — §5.7. 저축·이체 유형에서만 의미가 있다 */}
+          {(type === 'SAVING' || type === 'TRANSFER') && (
+            <div>
+              <Label hint="이 카테고리에 입력한 금액이 자동으로 반영된다">
+                자산·부채 연결
+              </Label>
+              <select
+                value={linkId}
+                onChange={(e) => setLinkId(e.target.value)}
+                className="min-h-11 w-full rounded-xl bg-white px-3 text-[16px] text-zinc-900 ring-1 ring-zinc-300 outline-none focus:ring-2 focus:ring-zinc-900"
+              >
+                <option value="">연결 없음</option>
+                {(assets ?? []).length > 0 && (
+                  <optgroup label="자산 (늘어남)">
+                    {(assets ?? []).map((asset) => (
+                      <option key={asset.id} value={`asset:${asset.id}`}>
+                        {asset.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {(debts ?? []).length > 0 && (
+                  <optgroup label="부채 (줄어듦)">
+                    {(debts ?? []).map((debt) => (
+                      <option key={debt.id} value={`debt:${debt.id}`}>
+                        {debt.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                연결하면 이 카테고리의 거래가 그 자산·부채 잔액에 바로 반영됩니다.
+                기준일 이후의 거래만 더하므로 과거 기록이 소급되지 않습니다.
+                투자처럼 시세가 변하는 자산은 잔액을 직접 갱신하면 그 시점이
+                새 기준일이 됩니다.
+              </p>
+            </div>
+          )}
 
           <label className="flex min-h-11 items-center gap-2 text-[14px] text-zinc-700">
             <input

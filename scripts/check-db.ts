@@ -41,7 +41,8 @@ async function main(): Promise<void> {
   await db.open()
   await financeDb.open()
   check('workout-log verno', db.verno, 3)
-  check('finance-log verno', financeDb.verno, 5)
+  // v6 = 거래 반영 기준일(spec-finance-v0.12 §5.7)
+  check('finance-log verno', financeDb.verno, 6)
   check('workout syncState 존재', db.tables.some((t) => t.name === 'syncState'), true)
   check('finance syncState 존재', financeDb.tables.some((t) => t.name === 'syncState'), true)
 
@@ -67,7 +68,7 @@ async function main(): Promise<void> {
 
   const fBackup = await financeBackup.exportBackup()
   check('finance tables에 syncState 없음', 'syncState' in fBackup.tables, false)
-  check('finance dbVersion 기록', fBackup.dbVersion, 5)
+  check('finance dbVersion 기록', fBackup.dbVersion, 6)
 
   console.log('\n[4] 복원이 전체 교체인가')
   // 백업을 뜬 뒤에 추가한 종목은 복원 후 사라져야 한다.

@@ -22,7 +22,12 @@ import {
   setTemplateArchived,
   type TemplateDraftItem,
 } from '../db/templates'
-import { minutesToSeconds, secondsToMinutes } from '../lib/cardio'
+import {
+  joinSeconds,
+  minutesToSeconds,
+  secondsToMinutes,
+  splitSeconds,
+} from '../lib/cardio'
 import { ExercisePickerSheet } from './ExercisePickerSheet'
 
 /**
@@ -378,17 +383,36 @@ function DraftRowCard({
       )}
 
       {type === 'TIME' && (
-        <div className="mt-2 grid grid-cols-3 gap-2">
+        /* 목표 시간도 분·초로 받는다 — 세션 입력과 단위를 맞춘다(§4.1.1) */
+        <div className="mt-2 grid grid-cols-4 gap-2">
           <NumberField
             label="세트"
             value={row.targetSets}
             onChange={(targetSets) => onPatch({ targetSets })}
           />
           <NumberField
-            label="시간"
-            suffix="초"
-            value={row.targetSeconds}
-            onChange={(targetSeconds) => onPatch({ targetSeconds })}
+            label="분"
+            value={splitSeconds(row.targetSeconds).minutes}
+            onChange={(minutes) =>
+              onPatch({
+                targetSeconds: joinSeconds(
+                  minutes,
+                  splitSeconds(row.targetSeconds).seconds,
+                ),
+              })
+            }
+          />
+          <NumberField
+            label="초"
+            value={splitSeconds(row.targetSeconds).seconds}
+            onChange={(seconds) =>
+              onPatch({
+                targetSeconds: joinSeconds(
+                  splitSeconds(row.targetSeconds).minutes,
+                  seconds,
+                ),
+              })
+            }
           />
           <NumberField
             label="휴식"

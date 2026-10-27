@@ -3,6 +3,8 @@ import { calculateSavingsRate, type SavingsRate } from '../lib/savingsRate'
 import { getCycleCategoryBudgets } from './budgetPlan'
 import { listCategories } from './categories'
 import { getCycleBudget } from './cycleBudget'
+import { computeNetWorth } from '../lib/netWorth'
+import { loadBalances } from './balances'
 import { financeDb } from './db'
 import { DEFAULT_PAYDAY, getIncomeSetting } from './income'
 import type { Category, Group, Transaction } from './types'
@@ -81,8 +83,7 @@ export async function getCycleSummary(cycleKey: string): Promise<CycleSummary> {
     previous,
     categories,
     groups,
-    assets,
-    debts,
+    balances,
     goal,
     budget,
     planned,
@@ -91,8 +92,8 @@ export async function getCycleSummary(cycleKey: string): Promise<CycleSummary> {
       financeDb.transactions.where('cycleKey').equals(previousCycle).toArray(),
       listCategories(false),
       financeDb.groups.orderBy('sortOrder').toArray(),
-      financeDb.assets.toArray(),
-      financeDb.debts.toArray(),
+      // 잔액 공식은 balances.ts 한 곳에만 있다 — §5.7
+      loadBalances(),
       financeDb.goals.toArray().then((goals) => goals[0]),
       getCycleBudget(cycleKey),
       getCycleCategoryBudgets(cycleKey),
@@ -142,9 +143,7 @@ export async function getCycleSummary(cycleKey: string): Promise<CycleSummary> {
       budgetOf,
     ),
     isPlanned: planned.size > 0,
-    netWorth:
-      assets.reduce((sum, asset) => sum + asset.balance, 0) -
-      debts.reduce((sum, debt) => sum + debt.balance, 0),
+    netWorth: computeNetWorth(balances.assets, balances.debts).netWorth,
     goalTarget: goal?.targetAmount,
     goalName: goal?.name,
     monthlyContribution:

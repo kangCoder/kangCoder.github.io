@@ -83,9 +83,14 @@ export async function deleteFixedCost(id: string): Promise<void> {
 export interface ApplyResult {
   /** 만든 거래 수 */
   created: number
-  /** 잔액을 갱신한 부채 수 */
+  /**
+   * 잔액에 반영될 부채·자산 수 — spec-finance-v0.12 §5.7
+   *
+   * v0.12부터 **잔액을 직접 고치지 않는다.** 만든 거래가 `balances.ts`의
+   * 합산에 자동으로 들어가므로, 여기서 또 더하면 두 번 세게 된다.
+   * 이 숫자는 "몇 건이 잔액에 반영되는가"를 알려 주는 표시용이다.
+   */
   debtsUpdated: number
-  /** 잔액을 갱신한 자산 수 */
   assetsUpdated: number
 }
 
@@ -95,13 +100,8 @@ export async function ensureFixedCostTransactions(
 ): Promise<ApplyResult> {
   return financeDb.transaction(
     'rw',
-    [
-      financeDb.fixedCosts,
-      financeDb.categories,
-      financeDb.transactions,
-      financeDb.debts,
-      financeDb.assets,
-    ],
+    // debts·assets를 더 이상 쓰지 않는다 — 잔액은 거래에서 파생된다(§5.7)
+    [financeDb.fixedCosts, financeDb.categories, financeDb.transactions],
     async () => {
       const result: ApplyResult = {
         created: 0,
@@ -122,7 +122,6 @@ export async function ensureFixedCostTransactions(
         active.map((cost) => cost.categoryId),
       )
       const { start, end } = getCycleRange(cycleKey, payday)
-      const now = Date.now()
 
       for (const [index, cost] of active.entries()) {
         const category = categories[index]
@@ -147,26 +146,14 @@ export async function ensureFixedCostTransactions(
         })
         result.created++
 
-        // 부채는 줄고 자산은 늘어난다. 0 아래로는 내려가지 않는다.
-        if (cost.linkedDebtId) {
-          const debt = await financeDb.debts.get(cost.linkedDebtId)
-          if (debt) {
-            await financeDb.debts.update(debt.id, {
-              balance: Math.max(0, debt.balance - cost.amount),
-            })
-            result.debtsUpdated++
-          }
-        }
-        if (cost.linkedAssetId) {
-          const asset = await financeDb.assets.get(cost.linkedAssetId)
-          if (asset) {
-            await financeDb.assets.update(asset.id, {
-              balance: asset.balance + cost.amount,
-              updatedAt: now,
-            })
-            result.assetsUpdated++
-          }
-        }
+        /**
+         * **잔액을 직접 고치지 않는다** — §5.7
+         *
+         * 방금 만든 거래가 `balances.ts`의 합산에 들어가므로 잔액은 저절로
+         * 움직인다. 여기서 또 더하면 같은 금액을 두 번 센다. 세는 것만 한다.
+         */
+        if (cost.linkedDebtId) result.debtsUpdated++
+        if (cost.linkedAssetId) result.assetsUpdated++
       }
       return result
     },
