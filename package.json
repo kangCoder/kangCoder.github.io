@@ -14,7 +14,8 @@
     "check:mutations": "tsx scripts/check-mutations.ts",
     "check:balances": "tsx scripts/check-balances.ts",
     "check:time": "tsx scripts/check-time.ts",
-    "check": "npm run check:db && npm run check:auth && npm run check:snapshot && npm run check:mutations && npm run check:balances && npm run check:time",
+    "check:dbversion": "tsx scripts/check-dbversion.ts",
+    "check": "npm run check:db && npm run check:auth && npm run check:snapshot && npm run check:mutations && npm run check:balances && npm run check:time && npm run check:dbversion",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -19,6 +19,7 @@ import {
 } from './snapshot'
 import { suppressMutations } from './mutations'
 import { ensureSyncState, patchSyncState } from './syncState'
+import { pullBlockedByVersion, pushBlockedByVersion } from './version'
 
 /**
  * 동기화 엔진 — docs/spec-sync-v0.1.md §5
@@ -165,7 +166,24 @@ export async function push(
   }
   if (!force && !state.dirty && head !== undefined) return { status: 'clean' }
 
-  if (head !== undefined && head.dbVersion !== area.db.verno) {
+  /**
+   * **원격이 더 새로울 때만 막는다** — docs/spec-sync-v0.1.md §8
+   *
+   * 처음엔 "정확히 같을 때만"으로 만들었는데 교착이 생겼다. 원격의
+   * `dbVersion`은 *마지막으로 올린 기기의 스키마 기록*이지 상대 기기의
+   * 현재 스키마가 아니다. 스키마를 올리면 양쪽 기기가 모두 새 버전이어도
+   * 원격 기록은 옛 번호로 남아 있고, 그 상태에서 같을 것을 요구하면
+   * 아무도 올릴 수 없어 원격이 영원히 옛 번호에 멈춘다.
+   *
+   * 올리는 것은 원격을 내 스키마로 **끌어올리는** 동작이므로 옛 원격을
+   * 덮는 것이 정상이고, 그게 교착을 푸는 유일한 경로다.
+   * 막아야 하는 경우는 반대 방향 하나다 — 내 앱이 원격 데이터보다 낡았으면,
+   * 내가 모르는 필드를 떨어뜨린 채 덮어쓴다.
+   */
+  if (
+    head !== undefined &&
+    pushBlockedByVersion(head.dbVersion, area.db.verno)
+  ) {
     return {
       status: 'blocked',
       reason: 'dbVersion',
@@ -288,7 +306,17 @@ export async function pull(area: SyncArea): Promise<PullResult> {
   if (head.rev === state.baseRev && !state.dirty) {
     return { status: 'uptodate', rev: head.rev }
   }
-  if (head.dbVersion !== area.db.verno) {
+  /**
+   * 원격이 내 앱보다 새로우면 받지 않는다 — §8
+   *
+   * 모르는 필드를 복원하면 다음 push에서 그 필드가 사라진 채 올라가
+   * 데이터가 조용히 깎인다. 새로고침하면 해소된다.
+   *
+   * 반대로 원격이 **낡은** 경우는 받는다. 스키마 변경을 필드 추가로만
+   * 제한하므로(§8.2) 없는 필드는 그냥 비어 있을 뿐이고, 받지 않으면
+   * 올릴 것이 없는 새 기기가 옛 원격을 영원히 못 받는다.
+   */
+  if (pullBlockedByVersion(head.dbVersion, area.db.verno)) {
     return {
       status: 'blocked',
       reason: 'dbVersion',

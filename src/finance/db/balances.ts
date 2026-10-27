@@ -85,17 +85,28 @@ export async function loadBalances(): Promise<Balances> {
   }
 
   /**
-   * 가장 이른 기준일 이후만 읽는다 — `date` 인덱스를 쓰므로 전체를
-   * 훑지 않는다. 기준일이 없는 항목이 있으면 전체를 읽어야 한다.
+   * 가장 이른 기준일 이후만 읽는다 — `date` 인덱스를 쓰므로 전체를 훑지 않는다.
+   *
+   * **기준일이 없는 항목은 아예 반영하지 않는다.** 전에는 undefined를
+   * "전부 더하기"로 읽었는데, 그러면 옛 백업을 복원하거나 구버전 기기가
+   * 올린 스냅샷을 받았을 때 몇 년치 저축이 잔액에 한꺼번에 더해진다.
+   * 오류 없이 숫자만 부풀어 알아차리기 어렵다. 기준이 없으면 반영하지
+   * 않는 쪽이 안전하고, v0.11까지의 동작과 같다.
    */
-  const allFrom = [...assetFrom.values(), ...debtFrom.values()]
-  const earliest = allFrom.includes(undefined)
-    ? undefined
-    : allFrom.filter((v): v is string => v !== undefined).sort()[0]
-  const transactions =
-    earliest === undefined
-      ? await financeDb.transactions.toArray()
-      : await financeDb.transactions.where('date').above(earliest).toArray()
+  const known = [...assetFrom.values(), ...debtFrom.values()].filter(
+    (value): value is string => value !== undefined,
+  )
+  if (known.length === 0) {
+    return {
+      assets: assets.map((asset) => ({ ...asset, reflected: 0 })),
+      debts: debts.map((debt) => ({ ...debt, reflected: 0 })),
+    }
+  }
+  const earliest = known.sort()[0]
+  const transactions = await financeDb.transactions
+    .where('date')
+    .above(earliest)
+    .toArray()
 
   const assetReflected = new Map<string, number>()
   const debtReflected = new Map<string, number>()
@@ -106,7 +117,8 @@ export async function loadBalances(): Promise<Balances> {
       assetByCategory.get(tx.categoryId)
     if (assetId !== undefined) {
       const from = assetFrom.get(assetId)
-      if (from === undefined || tx.date > from) {
+      // 기준일이 없으면 반영하지 않는다 (위 주석 참조)
+      if (from !== undefined && tx.date > from) {
         assetReflected.set(assetId, (assetReflected.get(assetId) ?? 0) + tx.amount)
       }
     }
@@ -116,7 +128,7 @@ export async function loadBalances(): Promise<Balances> {
       debtByCategory.get(tx.categoryId)
     if (debtId !== undefined) {
       const from = debtFrom.get(debtId)
-      if (from === undefined || tx.date > from) {
+      if (from !== undefined && tx.date > from) {
         debtReflected.set(debtId, (debtReflected.get(debtId) ?? 0) + tx.amount)
       }
     }

@@ -15,6 +15,7 @@
  *   6. 고정비 연결이 카테고리 연결보다 우선한다
  *   7. 보증금은 순자산에서 빠지고 제외 합계로 잡힌다
  *   8. countsInNetWorth를 켜면 보증금도 포함된다
+ *   9. 기준일이 없으면 반영하지 않는다 (옛 백업 복원 시 폭주 방지)
  */
 import 'fake-indexeddb/auto'
 
@@ -217,6 +218,26 @@ async function main(): Promise<void> {
   totals = computeNetWorth(balances.assets, balances.debts)
   check('켜면 순자산에 포함', totals.netWorth, 105_000_000)
   check('제외 합계 0', totals.excludedAssets, 0)
+
+  console.log('\n[9] 기준일이 없으면 반영하지 않는다')
+  // 옛 백업을 복원하거나 구버전 기기의 스냅샷을 받으면 reflectFrom이 없다.
+  // 그때 "전부 더하기"로 읽으면 몇 년치 저축이 한꺼번에 잔액에 더해진다.
+  await reset()
+  await financeDb.assets.add({
+    id: 'a1',
+    name: '옛 백업에서 온 자산',
+    kind: 'SAVINGS',
+    balance: 1_000_000,
+    updatedAt: 1,
+    isLiquidByTarget: true,
+    // reflectFrom 없음
+  } as never)
+  await addCategory({ assetId: 'a1' })
+  await addTx('old1', '2025-01-15', 500_000)
+  await addTx('old2', '2025-06-20', 700_000)
+  balances = await loadBalances()
+  check('기준일 없으면 반영 0', balances.assets[0].reflected, 0)
+  check('잔액 그대로', balances.assets[0].balance, 1_000_000)
 
   console.log(failures === 0 ? '\n전부 통과\n' : `\n${failures}건 실패\n`)
   process.exit(failures === 0 ? 0 : 1)
