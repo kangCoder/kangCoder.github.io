@@ -80,6 +80,18 @@ export function TransactionFormScreen() {
   const [memo, setMemo] = useState('')
   const [error, setError] = useState<string>()
   const [savedAt, setSavedAt] = useState(0)
+  /**
+   * 금액 칸을 다시 마운트시키는 신호 — §5.9
+   *
+   * `AmountField`는 입력 버퍼를 **마운트 시 한 번만** 초기화하고 `value`
+   * prop을 다시 읽지 않는다(커서가 튀는 것을 막기 위한 의도된 설계).
+   * 그래서 밖에서 `setAmount`만 하면 상태는 바뀌어도 화면에 보이지 않는다.
+   * 호출부에서 key로 리마운트하는 것이 이 프로젝트의 규약이다.
+   *
+   * 카테고리 id를 key에 쓰지 않는 이유 — 같은 급여 카테고리를 다시 누르면
+   * id가 그대로여서 다시 채워지지 않는다.
+   */
+  const [prefillAt, setPrefillAt] = useState(0)
   const [picking, setPicking] = useState(false)
   /** 급여 저장 중 원천 공제를 확인하는 단계 — §5.9 */
   const [deductionStep, setDeductionStep] = useState<{
@@ -153,7 +165,13 @@ export function TransactionFormScreen() {
     setCategoryId(id)
     setError(undefined)
     const next = categories?.find((category) => category.id === id)
-    if (next?.isSalary && income?.netPay) setAmount(income.netPay)
+    // 유형까지 함께 본다 — 수입이던 카테고리를 지출로 바꿔도 isSalary가
+    // 남아 있을 수 있고, 그러면 지출에 실수령액이 채워진다
+    if (next && isSalaryCategory(next) && income?.netPay) {
+      setAmount(income.netPay)
+      // 상태만 바꾸면 화면에 안 보인다 — 위 prefillAt 주석 참조
+      setPrefillAt((count) => count + 1)
+    }
   }
 
   async function save() {
@@ -166,7 +184,7 @@ export function TransactionFormScreen() {
       return
     }
     // 급여는 원천 공제를 함께 처리한다 — 확인 단계를 거친다(§5.9)
-    if (selected.isSalary) {
+    if (isSalaryCategory(selected)) {
       const links = await listWithheldLinks()
       if (links.length > 0) {
         const differs =
@@ -286,7 +304,7 @@ export function TransactionFormScreen() {
       <section className="flex flex-col gap-3 px-4 pb-4">
         {/* key로 리마운트해 저장 후 입력 버퍼를 비운다 */}
         <AmountField
-          key={`amount-${savedAt}`}
+          key={`amount-${savedAt}-${prefillAt}`}
           label="금액"
           value={amount}
           onChange={(next) => {
@@ -447,6 +465,20 @@ export function TransactionFormScreen() {
       </section>
     </div>
   )
+}
+
+/**
+ * 급여 수입 카테고리인가 — §5.9
+ *
+ * `isSalary`만 보면 안 된다. 수입이던 카테고리를 지출로 바꿨을 때 플래그가
+ * 남아 있으면 지출에 실수령액이 채워지고 원천 공제까지 적용된다.
+ * 저장 시 유형이 바뀌면 플래그를 지우지만, 읽는 쪽도 함께 확인한다.
+ */
+function isSalaryCategory(category: {
+  type: TxType
+  isSalary?: boolean
+}): boolean {
+  return category.type === 'INCOME' && category.isSalary === true
 }
 
 /**
