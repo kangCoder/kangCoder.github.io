@@ -1,12 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { IconButton } from '../../components/Button'
+import { Button, IconButton } from '../../components/Button'
 import { TrendChart } from '../components/TrendChart'
-import { getCycleReport, getSpendingTrend } from '../db/report'
+import { getCycleReportExport, getSpendingTrend } from '../db/report'
 import { DEFAULT_PAYDAY, getIncomeSetting } from '../db/income'
 import { getCurrentCycleKey, getCycleRange, shiftCycle } from '../lib/cycle'
+import { renderCycleReport } from '../lib/cycleReportMarkdown'
 import { formatPercent, formatWon } from '../lib/money'
+
+type CopyState = 'idle' | 'copied' | 'failed'
 
 /** 사이클 리포트 — §5.3 */
 export function CycleReportScreen() {
@@ -17,10 +20,33 @@ export function CycleReportScreen() {
     DEFAULT_PAYDAY,
   )
   const [offset, setOffset] = useState(0)
+  const [copyState, setCopyState] = useState<CopyState>('idle')
   const cycleKey = shiftCycle(getCurrentCycleKey(payday), offset)
-  const report = useLiveQuery(() => getCycleReport(cycleKey), [cycleKey])
+  // 추출용 데이터를 미리 읽어 둔다. 버튼을 누른 뒤에 DB를 기다리면
+  // iOS Safari가 사용자 동작이 끝났다고 보고 클립보드 쓰기를 막는다
+  const exportData = useLiveQuery(
+    () => getCycleReportExport(cycleKey),
+    [cycleKey],
+  )
+  const report = exportData?.report
   const trend = useLiveQuery(() => getSpendingTrend(cycleKey, 6), [cycleKey])
   const range = getCycleRange(cycleKey, payday)
+  const markdown = exportData ? renderCycleReport(exportData, range) : ''
+
+  function goCycle(delta: number) {
+    setOffset(offset + delta)
+    setCopyState('idle')
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(markdown)
+      setCopyState('copied')
+    } catch {
+      // 보안 컨텍스트가 아니거나 권한이 없으면 실패한다 — 아래에 원문을 펼친다
+      setCopyState('failed')
+    }
+  }
 
   return (
     <div className="flex flex-col">
@@ -38,22 +64,43 @@ export function CycleReportScreen() {
               />
             </svg>
           </IconButton>
-          <h1 className="flex-1 text-[17px] font-semibold text-zinc-900">
+          <h1 className="min-w-0 flex-1 truncate text-[17px] font-semibold text-zinc-900">
             사이클 리포트
           </h1>
+          <Button
+            disabled={!report || report.rows.length === 0}
+            onClick={copy}
+          >
+            {copyState === 'copied'
+              ? '복사됨 ✓'
+              : copyState === 'failed'
+                ? '복사 실패'
+                : '리포트 추출'}
+          </Button>
         </div>
         <div className="mt-1 flex items-center justify-between">
-          <IconButton aria-label="이전" onClick={() => setOffset(offset - 1)}>
+          <IconButton aria-label="이전" onClick={() => goCycle(-1)}>
             <Chevron direction="left" />
           </IconButton>
           <p className="text-[15px] font-medium tabular-nums text-zinc-900">
             {range.start} ~ {range.end.slice(5)}
           </p>
-          <IconButton aria-label="다음" onClick={() => setOffset(offset + 1)}>
+          <IconButton aria-label="다음" onClick={() => goCycle(1)}>
             <Chevron direction="right" />
           </IconButton>
         </div>
       </header>
+
+      {copyState === 'failed' && (
+        <section className="px-4 pt-1 pb-3">
+          <p className="mb-2 text-[12px] text-zinc-500">
+            클립보드에 넣지 못했습니다. 아래 내용을 길게 눌러 직접 복사하세요.
+          </p>
+          <pre className="overflow-x-auto rounded-xl bg-white p-3 text-[12px] leading-relaxed whitespace-pre text-zinc-800 ring-1 ring-zinc-200 select-text">
+            {markdown}
+          </pre>
+        </section>
+      )}
 
       {trend !== undefined && trend.some((p) => p.expense > 0 || p.saving > 0) && (
         <section className="px-4 pt-1 pb-3">

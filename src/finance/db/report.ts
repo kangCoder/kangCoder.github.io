@@ -128,3 +128,38 @@ export async function getSpendingTrend(
     }
   })
 }
+
+/**
+ * 사이클 리포트 추출용 데이터 — §5.3.1
+ *
+ * 화면용 집계(`getCycleReport`)를 그대로 쓰고, 카테고리별 지출 거래만 덧붙인다.
+ * 합계를 따로 다시 계산하지 않아야 추출본과 화면 숫자가 어긋나지 않는다.
+ */
+export interface CycleReportExport {
+  report: CycleReport
+  /** categoryId → 그 사이클의 지출 거래(날짜 오름차순) */
+  expensesByCategory: Map<string, Transaction[]>
+}
+
+export async function getCycleReportExport(
+  cycleKey: string,
+): Promise<CycleReportExport> {
+  const [report, transactions] = await Promise.all([
+    getCycleReport(cycleKey),
+    financeDb.transactions.where('cycleKey').equals(cycleKey).toArray(),
+  ])
+
+  const expensesByCategory = new Map<string, Transaction[]>()
+  for (const tx of transactions) {
+    if (tx.type !== 'EXPENSE') continue
+    const list = expensesByCategory.get(tx.categoryId) ?? []
+    list.push(tx)
+    expensesByCategory.set(tx.categoryId, list)
+  }
+  // 문서로 읽을 때는 시간 순서가 자연스럽다 (화면 시트는 최신순)
+  for (const list of expensesByCategory.values()) {
+    list.sort((a, b) => a.date.localeCompare(b.date))
+  }
+
+  return { report, expensesByCategory }
+}
