@@ -9,7 +9,7 @@ import { RestTimerContext, type RestState } from './restTimerContext'
 import { useCountdown } from './useCountdown'
 
 /**
- * 휴식 타이머 상태 — spec-v0.5.md §6.2
+ * 휴식 타이머 상태 — spec-v0.6.md §6.2
  *
  * **라우터 위에 둔다.** 원래 WorkoutScreen의 useState에 있었는데, 다른
  * 화면으로 가면 컴포넌트가 언마운트되며 타이머와 상태가 통째로 사라져

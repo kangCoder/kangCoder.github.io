@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 
 /**
- * 휴식 타이머 컨텍스트 — spec-v0.5.md §6.2
+ * 휴식 타이머 컨텍스트 — spec-v0.6.md §6.2
  *
  * 프로바이더 컴포넌트(`restTimer.tsx`)와 분리해 둔다. 한 파일이 컴포넌트와
  * 그 밖의 것을 함께 export하면 fast refresh가 동작하지 않는다

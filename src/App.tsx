@@ -92,7 +92,7 @@ function AutoSyncHost() {
       <SignedInShell />
       {/*
         타이머 바를 라우트 밖에서 그린다 — 세션 중에 종목 목록이나 지난
-        기록을 보러 가도 남은 시간이 따라와야 한다(spec-v0.5.md §6.2).
+        기록을 보러 가도 남은 시간이 따라와야 한다(spec-v0.6.md §6.2).
       */}
       <RestTimerHost />
       <SyncConflictSheet />

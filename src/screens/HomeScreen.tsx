@@ -5,7 +5,6 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, IconButton } from '../components/Button'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { EmptyState } from '../components/EmptyState'
 import { MonthCalendar } from '../components/MonthCalendar'
 import { listTemplateSummaries } from '../db/templates'
 import {
@@ -13,6 +12,7 @@ import {
   getActiveWorkout,
   listRecentWorkouts,
   listWorkoutsBetween,
+  startEmptyWorkout,
   startWorkoutFromTemplate,
   type WorkoutSummary,
 } from '../db/workouts'
@@ -43,6 +43,11 @@ export function HomeScreen() {
 
   async function start(templateId: string) {
     const workoutId = await startWorkoutFromTemplate(templateId)
+    navigate(`/workouts/${workoutId}`)
+  }
+
+  async function startEmpty() {
+    const workoutId = await startEmptyWorkout()
     navigate(`/workouts/${workoutId}`)
   }
 
@@ -83,13 +88,16 @@ export function HomeScreen() {
 
       <section className="px-4 pb-4">
         <h2 className="mb-2 text-[13px] font-medium text-zinc-500">
-          {active ? '다른 템플릿으로 시작' : '세션 시작'}
+          {active ? '새 세션 시작' : '세션 시작'}
         </h2>
+        {/* 템플릿이 없어도 시작할 수 있어야 한다 — §5.1.2 */}
+        <Button className="mb-2 w-full" onClick={startEmpty}>
+          + 빈 세션으로 시작
+        </Button>
         {templates === undefined ? null : templates.length === 0 ? (
-          <EmptyState
-            title="템플릿이 없습니다"
-            hint="템플릿 탭에서 먼저 하나 만들어 주세요."
-          />
+          <p className="rounded-xl bg-white px-3 py-4 text-center text-[12px] text-zinc-400 ring-1 ring-zinc-200">
+            자주 하는 구성은 템플릿 탭에서 만들어 두면 한 번에 시작할 수 있습니다
+          </p>
         ) : (
           <ul className="flex flex-col gap-1.5">
             {templates.map((template) => (

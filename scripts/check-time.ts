@@ -1,5 +1,5 @@
 /**
- * 분·초 변환 검증 — spec-v0.5.md §4.1.1
+ * 분·초 변환 검증 — spec-v0.6.md §4.1.1
  *
  * 실행: npm run check:time
  *

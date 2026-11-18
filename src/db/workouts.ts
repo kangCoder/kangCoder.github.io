@@ -127,6 +127,22 @@ export async function startWorkoutFromTemplate(
   )
 }
 
+/**
+ * 템플릿 없이 빈 세션을 시작한다 — §5.1.2
+ *
+ * 그날 몸 상태나 기구 사정에 맞춰 즉석으로 짜는 날이 있다. 그때마다 템플릿을
+ * 먼저 만들게 하면 일회성 템플릿이 목록에 쌓인다. 종목은 세션 화면의
+ * [+ 종목 추가]로 넣는다 — 템플릿 세션 중 추가와 같은 경로다.
+ *
+ * templateId·templateName을 비워 둔다. 화면은 이름이 없으면 '세션'으로 표시하고,
+ * 종료 시 템플릿 갱신 제안은 templateId가 없으면 건너뛴다.
+ */
+export async function startEmptyWorkout(): Promise<string> {
+  const workoutId = newId()
+  await db.workouts.add({ id: workoutId, startedAt: Date.now() })
+  return workoutId
+}
+
 export function getWorkout(id: string): Promise<Workout | undefined> {
   return db.workouts.get(id)
 }
